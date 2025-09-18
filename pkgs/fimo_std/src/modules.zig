@@ -543,10 +543,10 @@ pub fn Instance(comptime config: InstanceConfig) type {
             pub const VTable = extern struct {
                 ref: *const fn (ctx: *Inner) callconv(.c) void,
                 unref: *const fn (ctx: *Inner) callconv(.c) void,
-                query_namespace: *const fn (ctx: *Inner, ns: SliceConst(u8), dependency: *Dependency) callconv(.c) ctx.Status,
+                query_namespace: *const fn (ctx: *Inner, ns: SliceConst(u8)) callconv(.c) Dependency,
                 add_namespace: *const fn (ctx: *Inner, ns: SliceConst(u8)) callconv(.c) ctx.Status,
                 remove_namespace: *const fn (ctx: *Inner, ns: SliceConst(u8)) callconv(.c) ctx.Status,
-                query_dependency: *const fn (ctx: *Inner, handle: *Handle, dependency: *Dependency) callconv(.c) ctx.Status,
+                query_dependency: *const fn (ctx: *Inner, handle: *Handle) callconv(.c) Dependency,
                 add_dependency: *const fn (ctx: *Inner, handle: *Handle) callconv(.c) ctx.Status,
                 remove_dependency: *const fn (ctx: *Inner, handle: *Handle) callconv(.c) ctx.Status,
                 load_symbol: *const fn (ctx: *Inner, symbol: SymbolId, value: **const anyopaque) callconv(.c) ctx.Status,
@@ -673,11 +673,9 @@ pub fn Instance(comptime config: InstanceConfig) type {
         /// Checks if the module includes the namespace. In that case, the module is allowed access
         /// to the symbols in the namespace. Additionally, this function also queries whether the
         /// include is static, i.e., it was specified by the module at load time.
-        pub fn queryNamespace(self: *Self, ns: []const u8) ctx.Error!Dependency {
-            var dependency: Dependency = undefined;
+        pub fn queryNamespace(self: *Self, ns: []const u8) Dependency {
             const inner: *Inner = @ptrCast(@alignCast(self));
-            try inner.vtable.query_namespace(inner, .fromSlice(ns), &dependency).intoErrorUnion();
-            return dependency;
+            return inner.vtable.query_namespace(inner, .fromSlice(ns));
         }
 
         /// Adds a namespace dependency to the module.
@@ -705,11 +703,9 @@ pub fn Instance(comptime config: InstanceConfig) type {
         /// the instance is allowed to access the symbols exported by the module. Additionally,
         /// this function also queries whether the dependency is static, i.e., the dependency was
         /// specified by the module at load time.
-        pub fn queryDependency(self: *Self, h: *Handle) ctx.Error!Dependency {
-            var dependency: Dependency = undefined;
+        pub fn queryDependency(self: *Self, h: *Handle) Dependency {
             const inner: *Inner = @ptrCast(@alignCast(self));
-            try inner.vtable.query_dependency(inner, h, &dependency).intoErrorUnion();
-            return dependency;
+            return inner.vtable.query_dependency(inner, h);
         }
 
         /// Adds another module as a dependency.
@@ -838,7 +834,7 @@ pub const RootInstance = opaque {
     /// Checks if the module includes the namespace. In that case, the module is allowed access
     /// to the symbols in the namespace. Additionally, this function also queries whether the
     /// include is static, i.e., it was specified by the module at load time.
-    pub fn queryNamespace(self: *RootInstance, ns: []const u8) ctx.Error!Dependency {
+    pub fn queryNamespace(self: *RootInstance, ns: []const u8) Dependency {
         const inner: *OpaqueInstance = @ptrCast(@alignCast(self));
         return inner.queryNamespace(ns);
     }
@@ -868,7 +864,7 @@ pub const RootInstance = opaque {
     /// the instance is allowed to access the symbols exported by the module. Additionally,
     /// this function also queries whether the dependency is static, i.e., the dependency was
     /// specified by the module at load time.
-    pub fn queryDependency(self: *RootInstance, handle: *Handle) ctx.Error!Dependency {
+    pub fn queryDependency(self: *RootInstance, handle: *Handle) Dependency {
         const inner: *OpaqueInstance = @ptrCast(@alignCast(self));
         return inner.queryDependency(handle);
     }

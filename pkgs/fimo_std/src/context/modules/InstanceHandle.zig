@@ -1262,11 +1262,7 @@ const InstanceVTableImpl = struct {
         defer inner.unlock();
         inner.unrefStrong();
     }
-    fn queryNamespace(
-        ctx: *pub_modules.OpaqueInstance.Inner,
-        ns: SliceConst(u8),
-        dependency: *pub_modules.Dependency,
-    ) callconv(.c) pub_context.Status {
+    fn queryNamespace(ctx: *pub_modules.OpaqueInstance.Inner, ns: SliceConst(u8)) callconv(.c) pub_modules.Dependency {
         const self = fromInstancePtr(@ptrCast(ctx));
         tracing.logTrace(
             @src(),
@@ -1277,12 +1273,10 @@ const InstanceVTableImpl = struct {
         const inner = self.lock();
         defer inner.unlock();
 
-        if (inner.getNamespace(ns.intoSliceOrEmpty())) |info| {
-            dependency.* = if (info.* == .static) .static else .dynamic;
-        } else {
-            dependency.* = .none;
-        }
-        return .ok;
+        return if (inner.getNamespace(ns.intoSliceOrEmpty())) |info|
+            if (info.* == .static) .static else .dynamic
+        else
+            .none;
     }
     fn addNamespace(ctx: *pub_modules.OpaqueInstance.Inner, ns: SliceConst(u8)) callconv(.c) pub_context.Status {
         const self = fromInstancePtr(@ptrCast(ctx));
@@ -1305,8 +1299,7 @@ const InstanceVTableImpl = struct {
     fn queryDependency(
         ctx: *pub_modules.OpaqueInstance.Inner,
         handle: *pub_modules.Handle,
-        dependency: *pub_modules.Dependency,
-    ) callconv(.c) pub_context.Status {
+    ) callconv(.c) pub_modules.Dependency {
         const self = fromInstancePtr(@ptrCast(ctx));
         tracing.logTrace(
             @src(),
@@ -1317,12 +1310,10 @@ const InstanceVTableImpl = struct {
         const inner = self.lock();
         defer inner.unlock();
 
-        if (inner.getDependency(handle.name())) |x| {
-            dependency.* = if (x.type == .static) .static else .dynamic;
-        } else {
-            dependency.* = .none;
-        }
-        return .ok;
+        return if (inner.getDependency(handle.name())) |x|
+            if (x.type == .static) .static else .dynamic
+        else
+            .none;
     }
     fn addDependency(ctx: *pub_modules.OpaqueInstance.Inner, handle: *pub_modules.Handle) callconv(.c) pub_context.Status {
         const self = fromInstancePtr(@ptrCast(ctx));

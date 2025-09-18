@@ -2793,11 +2793,10 @@ typedef struct FSTD__ModuleInstance FSTD__ModuleInstance;
 typedef struct {
     void (*ref)(FSTD__ModuleInstance *ctx);
     void (*unref)(FSTD__ModuleInstance *ctx);
-    FSTD_Status (*query_namespace)(FSTD__ModuleInstance *ctx, FSTD_StrConst ns, FSTD_ModuleDependency *dependency);
+    FSTD_ModuleDependency (*query_namespace)(FSTD__ModuleInstance *ctx, FSTD_StrConst ns);
     FSTD_Status (*add_namespace)(FSTD__ModuleInstance *ctx, FSTD_StrConst ns);
     FSTD_Status (*remove_namespace)(FSTD__ModuleInstance *ctx, FSTD_StrConst ns);
-    FSTD_Status (*query_dependency)(FSTD__ModuleInstance *ctx, FSTD_ModuleHandle *handle,
-                                    FSTD_ModuleDependency *dependency);
+    FSTD_ModuleDependency (*query_dependency)(FSTD__ModuleInstance *ctx, FSTD_ModuleHandle *handle);
     FSTD_Status (*add_dependency)(FSTD__ModuleInstance *ctx, FSTD_ModuleHandle *handle);
     FSTD_Status (*remove_dependency)(FSTD__ModuleInstance *ctx, FSTD_ModuleHandle *handle);
     FSTD_Status (*load_symbol)(FSTD__ModuleInstance *ctx, FSTD_ModuleSymbol symbol, const void **loaded);
@@ -2895,10 +2894,9 @@ fstd_util void fstd_module_instance_unref(FSTD_ModuleInstance *ctx) {
 /// Checks if the module includes the namespace. In that case, the module is allowed access
 /// to the symbols in the namespace. Additionally, this function also queries whether the
 /// include is static, i.e., it was specified by the module at load time.
-FSTD_CHECK_USE fstd_util FSTD_Status fstd_module_instance_query_namespace(FSTD_ModuleInstance *ctx, FSTD_StrConst ns,
-                                                                          FSTD_ModuleDependency *dependency) {
+fstd_util FSTD_ModuleDependency fstd_module_instance_query_namespace(FSTD_ModuleInstance *ctx, FSTD_StrConst ns) {
     FSTD__ModuleInstance *ctx_ = (FSTD__ModuleInstance *)ctx;
-    return ctx_->vtable->query_namespace(ctx_, ns, dependency);
+    return ctx_->vtable->query_namespace(ctx_, ns);
 }
 
 /// Adds a namespace dependency to the module.
@@ -2926,11 +2924,10 @@ FSTD_CHECK_USE fstd_util FSTD_Status fstd_module_instance_remove_namespace(FSTD_
 /// the instance is allowed to access the symbols exported by the module. Additionally,
 /// this function also queries whether the dependency is static, i.e., the dependency was
 /// specified by the module at load time.
-FSTD_CHECK_USE fstd_util FSTD_Status fstd_module_instance_query_dependency(FSTD_ModuleInstance *ctx,
-                                                                           FSTD_ModuleHandle *handle,
-                                                                           FSTD_ModuleDependency *dependency) {
+fstd_util FSTD_ModuleDependency fstd_module_instance_query_dependency(FSTD_ModuleInstance *ctx,
+                                                                      FSTD_ModuleHandle *handle) {
     FSTD__ModuleInstance *ctx_ = (FSTD__ModuleInstance *)ctx;
-    return ctx_->vtable->query_dependency(ctx_, handle, dependency);
+    return ctx_->vtable->query_dependency(ctx_, handle);
 }
 
 /// Adds another module as a dependency.
@@ -3039,11 +3036,10 @@ fstd_util void fstd_module_root_instance_deinit(FSTD_ModuleRootInstance *ctx) {
 /// Checks if the module includes the namespace. In that case, the module is allowed access
 /// to the symbols in the namespace. Additionally, this function also queries whether the
 /// include is static, i.e., it was specified by the module at load time.
-FSTD_CHECK_USE fstd_util FSTD_Status fstd_module_root_instance_query_namespace(FSTD_ModuleRootInstance *ctx,
-                                                                               FSTD_StrConst ns,
-                                                                               FSTD_ModuleDependency *dependency) {
+fstd_util FSTD_ModuleDependency fstd_module_root_instance_query_namespace(FSTD_ModuleRootInstance *ctx,
+                                                                          FSTD_StrConst ns) {
     FSTD_ModuleInstance *ctx_ = (FSTD_ModuleInstance *)ctx;
-    return fstd_module_instance_query_namespace(ctx_, ns, dependency);
+    return fstd_module_instance_query_namespace(ctx_, ns);
 }
 
 /// Adds a namespace dependency to the module.
@@ -3073,11 +3069,10 @@ FSTD_CHECK_USE fstd_util FSTD_Status fstd_module_root_instance_remove_namespace(
 /// the instance is allowed to access the symbols exported by the module. Additionally,
 /// this function also queries whether the dependency is static, i.e., the dependency was
 /// specified by the module at load time.
-FSTD_CHECK_USE fstd_util FSTD_Status fstd_module_root_instance_query_dependency(FSTD_ModuleRootInstance *ctx,
-                                                                                FSTD_ModuleHandle *handle,
-                                                                                FSTD_ModuleDependency *dependency) {
+fstd_util FSTD_ModuleDependency fstd_module_root_instance_query_dependency(FSTD_ModuleRootInstance *ctx,
+                                                                           FSTD_ModuleHandle *handle) {
     FSTD_ModuleInstance *ctx_ = (FSTD_ModuleInstance *)ctx;
-    return fstd_module_instance_query_dependency(ctx_, handle, dependency);
+    return fstd_module_instance_query_dependency(ctx_, handle);
 }
 
 /// Adds another module as a dependency.
