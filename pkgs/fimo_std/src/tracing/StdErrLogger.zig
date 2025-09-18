@@ -251,10 +251,7 @@ fn runWorker(self: *Self) void {
         var msg: Msg = undefined;
         ring_buffer.read(@ptrCast(&msg));
         switch (msg) {
-            .quit => {
-                std.debug.print("quit\n", .{});
-                return;
-            },
+            .quit => return,
             .create_call_stack => |event| {
                 const stack = self.gpa.create(Stack) catch @panic("oom");
                 stack.* = .{ .arena = .init(self.gpa) };
