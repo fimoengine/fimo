@@ -1489,6 +1489,14 @@ pub fn joinRequested(self: *Executor) bool {
 }
 
 pub fn enqueue(self: *Executor, futex: *Futex, cmd_buf: *fimo_tasks_meta.CmdBuf) *CmdBuf {
+    return self.enqueueInner(futex, cmd_buf, false);
+}
+
+pub fn enqueueDetached(self: *Executor, futex: *Futex, cmd_buf: *fimo_tasks_meta.CmdBuf) void {
+    _ = self.enqueueInner(futex, cmd_buf, true);
+}
+
+fn enqueueInner(self: *Executor, futex: *Futex, cmd_buf: *fimo_tasks_meta.CmdBuf, detached: bool) *CmdBuf {
     debug.assert(!self.joinRequested() or self.cmd_bufs_count.load(.monotonic) != 0);
     _ = self.cmd_bufs_count.fetchAdd(1, .monotonic);
     const buf = self.cmd_bufs.create(futex);
@@ -1496,14 +1504,10 @@ pub fn enqueue(self: *Executor, futex: *Futex, cmd_buf: *fimo_tasks_meta.CmdBuf)
         .owner = self,
         .msg = .{ .tag = .enqueue_cmd_buf },
         .cmd_buf = cmd_buf,
+        .dropped = .init(detached),
     };
     self.msg_queue.push(futex, &buf.msg);
     return buf;
-}
-
-pub fn enqueueDetached(self: *Executor, futex: *Futex, cmd_buf: *fimo_tasks_meta.CmdBuf) void {
-    const buf = self.enqueue(futex, cmd_buf);
-    buf.detach(futex);
 }
 
 pub fn wakeByAddress(self: *Executor, futex: *Futex, ptr: *const atomic.Value(u32)) void {
@@ -1540,7 +1544,6 @@ fn run(self: *Executor, futex: *Futex) void {
                 .task_to_worker => unreachable,
                 .dealloc_cmd_buf => {
                     const cmd_buf: *CmdBuf = @alignCast(@fieldParentPtr("msg", msg));
-                    if (cmd_buf.cmd_buf.deinit) |f| f(cmd_buf.cmd_buf);
                     const join_fence = cmd_buf.join_fence;
                     self.cmd_bufs.destroy(futex, cmd_buf);
                     _ = self.cmd_bufs_count.fetchSub(1, .monotonic);
@@ -1679,6 +1682,14 @@ fn run(self: *Executor, futex: *Futex) void {
 
             // NOTE(gabriel): Now that we processed all commands we wait until they complete.
             if (cmd_buf.spawn_list.first != null) continue;
+
+            // NOTE(gabriel):
+            //
+            // The dtor must be called here due to how the join is implemented.
+            // If the handle is not in a detached state at this point, the waiter
+            // will be woken up immediately on the call to `finish`. If the internal
+            // buffer was allocated on the stack it may then be invalidated before the
+            // destructor can be called.
             if (cmd_buf.cmd_buf.deinit) |f| f(cmd_buf.cmd_buf);
             if (cmd_buf.finish(futex)) {
                 self.cmd_bufs.destroy(futex, cmd_buf);
