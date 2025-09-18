@@ -904,7 +904,7 @@ pub const Scheduler = struct {
             var curr_block = current.after_subset;
             while (curr_block) |block| : (curr_block = block.next) {
                 for (&block.entries) |opt_entry| {
-                    const entry = opt_entry orelse continue;
+                    const entry = opt_entry orelse break;
                     if (entry.before) |before| {
                         if (!before.append(current)) {
                             const new_block = self.allocSysBlock();
@@ -958,6 +958,7 @@ pub const Scheduler = struct {
         var tail: ?*ResBlock = null;
         var iter = std.mem.window(*Res, res, ResBlock.capacity, ResBlock.capacity);
         while (iter.next()) |value| {
+            if (value.len == 0) break;
             const block = self.allocResBlock();
             block.* = .{};
             for (value, block.entries[0..value.len]) |bef, *entry| entry.* = bef;
@@ -986,6 +987,7 @@ pub const Scheduler = struct {
         var tail: ?*CondBlock = null;
         var iter = std.mem.window(*Cond, conds, CondBlock.capacity, CondBlock.capacity);
         while (iter.next()) |value| {
+            if (value.len == 0) break;
             const block = self.allocCondBlock();
             block.* = .{};
             for (value, block.entries[0..value.len]) |bef, *entry| entry.* = bef;
@@ -1014,6 +1016,7 @@ pub const Scheduler = struct {
         var tail: ?*SysBlock = null;
         var iter = std.mem.window(*Sys, sys, SysBlock.capacity, SysBlock.capacity);
         while (iter.next()) |value| {
+            if (value.len == 0) break;
             const block = self.allocSysBlock();
             block.* = .{};
             for (value, block.entries[0..value.len]) |bef, *entry| entry.* = bef;
@@ -1108,8 +1111,8 @@ pub const Scheduler = struct {
                 var curr = sys.conditions;
                 while (curr) |block| : (curr = block.next) {
                     for (block.entries) |opt_dep| {
-                        num_conds += 1;
                         const dep = opt_dep orelse break;
+                        num_conds += 1;
                         const dep_node = allocator.create(Node) catch @panic("oom");
                         graph.put(std_allocator, @intFromPtr(dep), dep_node) catch @panic("oom");
                         node.deps.append(std_allocator, @intFromPtr(dep)) catch @panic("oom");
