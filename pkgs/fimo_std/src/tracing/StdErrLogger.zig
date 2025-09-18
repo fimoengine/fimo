@@ -6,17 +6,11 @@ const EventInfo = tracing.EventInfo;
 const Subscriber = tracing.Subscriber;
 const events = tracing.events;
 
-mutex: std.Thread.Mutex = .{},
-condition: std.Thread.Condition = .{},
-queue: std.DoublyLinkedList = .{},
-free_list: std.DoublyLinkedList = .{},
-stack_lock: std.Thread.RwLock = .{},
-stacks: std.AutoArrayHashMapUnmanaged(*anyopaque, *Stack) = .empty,
+ring_buffer: std.atomic.Value(?*RingBuffer) = .init(null),
 print_buffer_length: usize,
 gpa: std.mem.Allocator,
 max_level: Level,
 worker: std.Thread,
-quit: bool = false,
 
 pub const fimo_subscriber = .{
     .create_call_stack = onCreateCallStack,
@@ -77,67 +71,82 @@ const Stack = struct {
     spans: std.DoublyLinkedList = .{},
 };
 
-const Block = struct {
-    messages: [block_size]Message = undefined,
-    count: usize = 0,
+const Msg = union(enum) {
+    quit,
+    create_call_stack: struct { stack: *anyopaque },
+    destroy_call_stack: struct { stack: *anyopaque },
+    enter_span: struct {
+        stack: *anyopaque,
+        info: *const EventInfo,
+        msg_len: u16,
+    },
+    exit_span: struct { stack: *anyopaque },
+    log_message: struct {
+        stack: *anyopaque,
+        info: *const EventInfo,
+        msg_len: u16,
+    },
+};
+
+const RingBuffer = struct {
+    const buffer_len = 64 * 1024;
+    const max_msg_len = buffer_len - 1;
+
+    mutex: std.Thread.Mutex = .{},
+    read_condition: std.Thread.Condition = .{},
+    write_condition: std.Thread.Condition = .{},
+    buffer: [buffer_len]u8 = undefined,
     read_idx: usize = 0,
     write_idx: usize = 0,
-    node: std.DoublyLinkedList.Node = .{},
 
-    const block_size = 32;
-    comptime {
-        if (!std.math.isPowerOfTwo(block_size)) @compileError("block_size must be a power of two");
+    fn used(self: *RingBuffer) usize {
+        return (buffer_len - self.read_idx + self.write_idx) % buffer_len;
     }
 
-    fn init(msg: Message, gpa: std.mem.Allocator) *Block {
-        const block = gpa.create(Block) catch @panic("oom");
-        block.reset(msg);
-        return block;
+    fn free(self: *RingBuffer) usize {
+        return (buffer_len - 1 - self.write_idx + self.read_idx) % buffer_len;
     }
 
-    fn deinit(self: *Block, gpa: std.mem.Allocator) void {
-        std.debug.assert(self.count == 0);
-        gpa.destroy(self);
+    fn write(self: *RingBuffer, msg: []const u8) void {
+        if (msg.len == 0) return;
+        const msg_len = @min(msg.len, max_msg_len);
+
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        while (self.free() < msg_len) {
+            self.read_condition.wait(&self.mutex);
+        }
+
+        const slice_0_len = @min(buffer_len - self.write_idx, msg_len);
+        const slice_1_len = msg_len - slice_0_len;
+        const slice_0 = self.buffer[self.write_idx..][0..slice_0_len];
+        @memcpy(slice_0, msg[0..slice_0_len]);
+        const slice_1 = self.buffer[0..slice_1_len];
+        @memcpy(slice_1, msg[slice_0_len..msg_len]);
+
+        self.write_idx = (self.write_idx + msg_len) % buffer_len;
+        self.write_condition.signal();
     }
 
-    fn reset(self: *Block, msg: Message) void {
-        self.* = .{};
-        self.messages[0] = msg;
-        self.count = 1;
-        self.write_idx = 1;
-    }
+    fn read(self: *RingBuffer, buffer: []u8) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        while (self.used() < buffer.len) {
+            self.write_condition.wait(&self.mutex);
+        }
 
-    fn tryRead(self: *Block) ?Message {
-        if (self.count == 0) return null;
-        const msg = self.messages[self.read_idx];
-        self.messages[self.read_idx] = undefined;
-        self.count -= 1;
-        self.read_idx = (self.read_idx + 1) & (block_size - 1);
-        return msg;
-    }
+        const slice_0_len = @min(buffer_len - self.read_idx, buffer.len);
+        const slice_1_len = buffer.len - slice_0_len;
+        const slice_0 = self.buffer[self.read_idx..][0..slice_0_len];
+        @memcpy(buffer[0..slice_0_len], slice_0);
+        const slice_1 = self.buffer[0..slice_1_len];
+        @memcpy(buffer[slice_0_len..], slice_1);
 
-    fn tryWrite(self: *Block, msg: Message) bool {
-        if (self.count == block_size) return false;
-        self.messages[self.write_idx] = msg;
-        self.count += 1;
-        self.write_idx = (self.write_idx + 1) & (block_size - 1);
-        return true;
+        self.read_idx = (self.read_idx + buffer.len) % buffer_len;
+        self.read_condition.broadcast();
     }
 };
 
-const Message = union(enum) {
-    destroy_stack: *anyopaque,
-    append_frame: struct {
-        stack: *Stack,
-        frame: *Frame,
-    },
-    destroy_frame: *anyopaque,
-    log: struct {
-        stack: *Stack,
-        info: *const EventInfo,
-        message: []u8,
-    },
-};
 const Self = @This();
 
 pub const Options = struct {
@@ -157,18 +166,8 @@ pub fn init(self: *Self, options: Options) !void {
 }
 
 pub fn deinit(self: *Self) void {
-    self.mutex.lock();
-    self.quit = true;
-    self.condition.signal();
-    self.mutex.unlock();
+    self.pushMessage(.quit, &.{});
     self.worker.join();
-
-    while (self.free_list.pop()) |node| {
-        const block: *Block = @fieldParentPtr("node", node);
-        block.deinit(self.gpa);
-    }
-    std.debug.assert(self.stacks.count() == 0);
-    self.stacks.deinit(self.gpa);
     self.* = undefined;
 }
 
@@ -177,98 +176,56 @@ pub fn subscriber(self: *Self) Subscriber {
 }
 
 fn onCreateCallStack(self: *Self, event: *const events.CreateCallStack) void {
-    const stack = self.gpa.create(Stack) catch @panic("oom");
-    stack.* = .{ .arena = .init(self.gpa) };
-
-    self.stack_lock.lock();
-    defer self.stack_lock.unlock();
-    self.stacks.put(self.gpa, event.stack, stack) catch @panic("oom");
+    self.pushMessage(.{ .create_call_stack = .{ .stack = event.stack } }, &.{});
 }
 
 fn onDestroyCallStack(self: *Self, event: *const events.DestroyCallStack) void {
-    self.pushMessage(.{ .destroy_stack = event.stack });
+    self.pushMessage(.{ .destroy_call_stack = .{ .stack = event.stack } }, &.{});
 }
 
 fn onEnterSpan(self: *Self, event: *const events.EnterSpan) void {
-    const stack = blk: {
-        self.stack_lock.lockShared();
-        defer self.stack_lock.unlockShared();
-        break :blk self.stacks.get(event.stack).?;
-    };
-    const frame = blk: {
-        stack.lock.lock();
-        defer stack.lock.unlock();
-        const message = event.message.intoSliceOrEmpty();
-        break :blk Frame.init(event.span, message, stack.arena.allocator());
-    };
-    self.pushMessage(.{ .append_frame = .{ .stack = stack, .frame = frame } });
+    self.pushMessage(
+        .{
+            .enter_span = .{
+                .stack = event.stack,
+                .info = event.span,
+                .msg_len = @intCast(@min(event.message.len, RingBuffer.max_msg_len - @sizeOf(Msg))),
+            },
+        },
+        event.message.intoSliceOrEmpty(),
+    );
 }
 
 fn onExitSpan(self: *Self, event: *const events.ExitSpan) void {
-    self.pushMessage(.{ .destroy_frame = event.stack });
+    self.pushMessage(.{ .exit_span = .{ .stack = event.stack } }, &.{});
 }
 
 fn onLogMessage(self: *Self, event: *const events.LogMessage) void {
-    const stack = blk: {
-        self.stack_lock.lockShared();
-        defer self.stack_lock.unlockShared();
-        break :blk self.stacks.get(event.stack).?;
-    };
-    const dupe = blk: {
-        stack.lock.lock();
-        defer stack.lock.unlock();
-        const message = event.message.intoSliceOrEmpty();
-        break :blk stack.arena.allocator().dupe(u8, message) catch @panic("oom");
-    };
-    self.pushMessage(.{ .log = .{ .stack = stack, .info = event.info, .message = dupe } });
+    self.pushMessage(
+        .{
+            .log_message = .{
+                .stack = event.stack,
+                .info = event.info,
+                .msg_len = @intCast(@min(event.message.len, RingBuffer.max_msg_len - @sizeOf(Msg))),
+            },
+        },
+        event.message.intoSliceOrEmpty(),
+    );
 }
 
-fn takeOrAllocEmptyBlock(self: *Self, msg: Message) *Block {
-    const node = self.free_list.popFirst() orelse {
-        return Block.init(msg, self.gpa);
-    };
-    const block: *Block = @fieldParentPtr("node", node);
-    block.reset(msg);
-    return block;
-}
-
-fn pushMessage(self: *Self, msg: Message) void {
-    self.mutex.lock();
-    defer self.mutex.unlock();
-    const tail = self.queue.last orelse {
-        const block = self.takeOrAllocEmptyBlock(msg);
-        self.queue.append(&block.node);
-        self.condition.signal();
-        return;
-    };
-
-    const block: *Block = @fieldParentPtr("node", tail);
-    if (!block.tryWrite(msg)) {
-        const new_block = self.takeOrAllocEmptyBlock(msg);
-        self.queue.append(&new_block.node);
+fn pushMessage(self: *Self, msg: Msg, extra: []const u8) void {
+    while (self.ring_buffer.load(.monotonic) == null) {
+        std.Thread.yield() catch {};
     }
-    self.condition.signal();
-}
+    const ring_buffer = self.ring_buffer.load(.acquire).?;
 
-fn waitOnMessage(self: *Self) ?Message {
-    self.mutex.lock();
-    defer self.mutex.unlock();
-    while (true) {
-        const head = self.queue.first orelse {
-            if (self.quit) return null;
-            self.condition.wait(&self.mutex);
-            continue;
-        };
-
-        const block: *Block = @fieldParentPtr("node", head);
-        const msg = block.tryRead() orelse unreachable;
-        if (block.count == 0) {
-            _ = self.queue.popFirst();
-            self.free_list.prepend(&block.node);
-        }
-
-        return msg;
-    }
+    const locals = struct {
+        threadlocal var scratch: [RingBuffer.max_msg_len]u8 = undefined;
+    };
+    const scratch = &locals.scratch;
+    @memcpy(scratch[0..@sizeOf(Msg)], @as([]const u8, @ptrCast(&msg)));
+    @memcpy(scratch[@sizeOf(Msg)..][0..extra.len], extra);
+    ring_buffer.write(scratch[0 .. @sizeOf(Msg) + extra.len]);
 }
 
 fn runWorker(self: *Self) void {
@@ -278,45 +235,60 @@ fn runWorker(self: *Self) void {
     ) catch @panic("oom");
     defer self.gpa.free(print_buffer);
 
+    var ring_buffer: RingBuffer = .{};
+    self.ring_buffer.store(&ring_buffer, .release);
+
+    var stacks: std.AutoArrayHashMapUnmanaged(*anyopaque, *Stack) = .empty;
+    defer stacks.deinit(self.gpa);
+    defer std.debug.assert(stacks.count() == 0);
+
     const config = std.Io.tty.Config.detect(std.fs.File.stderr());
     const use_escape_codes = config == .escape_codes;
     _ = use_escape_codes;
-    while (self.waitOnMessage()) |msg| switch (msg) {
-        .destroy_stack => |s| {
-            const stack = blk: {
-                self.stack_lock.lock();
-                defer self.stack_lock.unlock();
-                break :blk self.stacks.fetchSwapRemove(s).?.value;
-            };
-            std.debug.assert(stack.spans.first == null);
-            stack.arena.deinit();
-            self.gpa.destroy(stack);
-        },
-        .append_frame => |m| {
-            const stack, const frame = .{ m.stack, m.frame };
-            stack.spans.append(&frame.node);
-        },
-        .destroy_frame => |s| {
-            const stack = blk: {
-                self.stack_lock.lockShared();
-                defer self.stack_lock.unlockShared();
-                break :blk self.stacks.get(s).?;
-            };
 
-            const node = stack.spans.pop() orelse unreachable;
-            const frame: *Frame = @fieldParentPtr("node", node);
-            stack.lock.lock();
-            defer stack.lock.unlock();
-            frame.deinit(stack.arena.allocator());
-        },
-        .log => |m| {
-            const stack, const info, const message = .{ m.stack, m.info, m.message };
-            self.emitLogEC(print_buffer, stack, info, message);
-            stack.lock.lock();
-            defer stack.lock.unlock();
-            stack.arena.allocator().free(message);
-        },
-    };
+    var msg_buffer: [RingBuffer.max_msg_len]u8 = undefined;
+    while (true) {
+        var msg: Msg = undefined;
+        ring_buffer.read(@ptrCast(&msg));
+        switch (msg) {
+            .quit => {
+                std.debug.print("quit\n", .{});
+                return;
+            },
+            .create_call_stack => |event| {
+                const stack = self.gpa.create(Stack) catch @panic("oom");
+                stack.* = .{ .arena = .init(self.gpa) };
+                stacks.put(self.gpa, event.stack, stack) catch @panic("oom");
+            },
+            .destroy_call_stack => |event| {
+                const stack = stacks.fetchSwapRemove(event.stack).?.value;
+                std.debug.assert(stack.spans.first == null);
+                stack.arena.deinit();
+                self.gpa.destroy(stack);
+            },
+            .enter_span => |event| {
+                const event_msg = msg_buffer[0..event.msg_len];
+                ring_buffer.read(event_msg);
+
+                const stack = stacks.get(event.stack).?;
+                const frame = Frame.init(event.info, event_msg, stack.arena.allocator());
+                stack.spans.append(&frame.node);
+            },
+            .exit_span => |event| {
+                const stack = stacks.get(event.stack).?;
+                const node = stack.spans.pop() orelse unreachable;
+                const frame: *Frame = @fieldParentPtr("node", node);
+                frame.deinit(stack.arena.allocator());
+            },
+            .log_message => |event| {
+                const event_msg = msg_buffer[0..event.msg_len];
+                ring_buffer.read(event_msg);
+
+                const stack = stacks.get(event.stack).?;
+                self.emitLogEC(print_buffer, stack, event.info, event_msg);
+            },
+        }
+    }
 }
 
 fn emitLogEC(
