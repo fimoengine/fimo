@@ -418,48 +418,53 @@ pub const Sys = struct {
     deinit_fence: ?*Fence,
     next: ?*Sys = null,
 
-    pub fn deinit(self: *Sys, fence: *Fence) void {
+    pub fn deinit(self: *Sys, fence: ?*Fence) void {
         const span = spanTrace(@src());
         defer span.exit();
 
-        std.debug.assert(self.owner == self);
-        const scheduler = self.scheduler;
-        scheduler.mutex.lock();
-        defer scheduler.mutex.unlock();
-        scheduler.dirty = true;
+        var f: Fence = .{};
+        defer if (fence == null) f.wait();
+        const fence_ptr = fence orelse &f;
+        {
+            std.debug.assert(self.owner == self);
+            const scheduler = self.scheduler;
+            scheduler.mutex.lock();
+            defer scheduler.mutex.unlock();
+            scheduler.dirty = true;
 
-        // NOTE(gabriel): Remove all entries belonging to the same set from the list.
-        var head: ?*Sys = null;
-        var link: *?*Sys = &scheduler.systems;
-        var curr: ?*Sys = scheduler.systems;
-        while (curr) |current| {
-            if (current.owner == self) {
-                link.* = current.next;
-                curr = current.next;
-                current.next = head;
-                head = current;
-            } else {
-                link = &current.next;
-                curr = current.next;
+            // NOTE(gabriel): Remove all entries belonging to the same set from the list.
+            var head: ?*Sys = null;
+            var link: *?*Sys = &scheduler.systems;
+            var curr: ?*Sys = scheduler.systems;
+            while (curr) |current| {
+                if (current.owner == self) {
+                    link.* = current.next;
+                    curr = current.next;
+                    current.next = head;
+                    head = current;
+                } else {
+                    link = &current.next;
+                    curr = current.next;
+                }
             }
-        }
 
-        // NOTE(gabriel): If the system is running we must wait for it's completion.
-        if (!scheduler.semaphore.isSignaled(scheduler.next_generation.load(.monotonic) - 1)) {
-            self.deinit_fence = fence;
+            // NOTE(gabriel): If the system is running we must wait for it's completion.
+            if (!scheduler.semaphore.isSignaled(scheduler.next_generation.load(.monotonic) - 1)) {
+                self.deinit_fence = fence_ptr;
+                while (head) |sys| {
+                    head = sys.next;
+                    sys.next = self.scheduler.cleanup_systems;
+                    self.scheduler.cleanup_systems = sys;
+                }
+                return;
+            }
+
             while (head) |sys| {
                 head = sys.next;
-                sys.next = self.scheduler.cleanup_systems;
-                self.scheduler.cleanup_systems = sys;
+                sys.cleanup();
             }
-            return;
+            fence_ptr.signal();
         }
-
-        while (head) |sys| {
-            head = sys.next;
-            sys.cleanup();
-        }
-        fence.signal();
     }
 
     fn cleanup(self: *Sys) void {
@@ -1490,7 +1495,7 @@ pub fn schedulerFlush(sched: *fimo_worlds.Scheduler) callconv(.c) void {
     s.flush();
 }
 
-pub fn sysDeinit(sys: *fimo_worlds.Sys, fence: *Fence) callconv(.c) void {
+pub fn sysDeinit(sys: *fimo_worlds.Sys, fence: ?*Fence) callconv(.c) void {
     const s: *Sys = @ptrCast(@alignCast(sys));
     s.deinit(fence);
 }

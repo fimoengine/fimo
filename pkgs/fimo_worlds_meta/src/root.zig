@@ -632,7 +632,8 @@ pub const Sys = opaque {
     ///
     /// The handle is invalidated after calling this function.
     /// The operation signals the fence on completion.
-    pub fn deinit(self: *Sys, fence: *Fence) void {
+    /// If no fence is provided, this function blocks until completion.
+    pub fn deinit(self: *Sys, fence: ?*Fence) void {
         const sym = symbols.sys_deinit.getGlobal().get();
         sym(self, fence);
     }

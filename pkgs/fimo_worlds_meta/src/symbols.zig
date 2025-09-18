@@ -106,7 +106,7 @@ pub const sys_deinit = Symbol{
     .name = "sys_deinit",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (sys: *Sys, fence: *Fence) callconv(.c) void,
+    .T = fn (sys: *Sys, fence: ?*Fence) callconv(.c) void,
 };
 pub const scheduler_run = Symbol{
     .name = "scheduler_run",

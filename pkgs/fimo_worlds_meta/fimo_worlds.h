@@ -188,7 +188,8 @@ FSTD_CHECK_USE fstd_func FSTD_Status fwrld_scheduler_add_sys(FWRLD_Scheduler sch
 ///
 /// The handle is invalidated after calling this function.
 /// The operation signals the fence on completion.
-fstd_func void fwrld_sys_deinit(FWRLD_Sys sys, FTSK_Fence *fence);
+/// If no fence is provided, this function blocks until completion.
+fstd_func void fwrld_sys_deinit(FWRLD_Sys sys, FTSK_Fence *FSTD_MAYBE_NULL fence);
 
 /// Starts a new run of the systems, blocking the current thread until it completes.
 fstd_func void fwrld_scheduler_run(FWRLD_Scheduler sched, FSTD_Arena *arena);
@@ -245,7 +246,7 @@ FSTD_SYMBOL_FN(FWRLD_SYM_WORLD_ADD_SCHEDULER, fwrld_sym_, FWRLD_Scheduler, world
 FSTD_SYMBOL_FN(FWRLD_SYM_SCHEDULER_DEINIT, fwrld_sym_, void, scheduler_deinit, FWRLD_Scheduler sched)
 FSTD_SYMBOL_FN(FWRLD_SYM_SCHEDULER_ADD_SYS, fwrld_sym_, FSTD_Status, scheduler_add_sys, FWRLD_Scheduler sched,
                const FWRLD_SysDesc *desc, FWRLD_Sys *sys)
-FSTD_SYMBOL_FN(FWRLD_SYM_SYS_DEINIT, fwrld_sym_, void, sys_deinit, FWRLD_Sys sys, FTSK_Fence *fence)
+FSTD_SYMBOL_FN(FWRLD_SYM_SYS_DEINIT, fwrld_sym_, void, sys_deinit, FWRLD_Sys sys, FTSK_Fence *FSTD_MAYBE_NULL fence)
 FSTD_SYMBOL_FN(FWRLD_SYM_SCHEDULER_RUN, fwrld_sym_, void, scheduler_run, FWRLD_Scheduler sched, FSTD_Arena *arena)
 FSTD_SYMBOL_FN(FWRLD_SYM_SCHEDULER_SCHEDULE, fwrld_sym_, void, scheduler_schedule, FWRLD_Scheduler sched,
                FSTD_Arena *arena, FTSK_Fence *FSTD_MAYBE_NULL start, FTSK_Fence *FSTD_MAYBE_NULL completion)
@@ -383,7 +384,7 @@ FSTD_CHECK_USE fstd_func_impl FSTD_Status fwrld_scheduler_add_sys(FWRLD_Schedule
     return fwrld_sym_scheduler_add_sys_get()(sched, desc, sys);
 }
 
-fstd_func_impl void fwrld_sys_deinit(FWRLD_Sys sys, FTSK_Fence *fence) {
+fstd_func_impl void fwrld_sys_deinit(FWRLD_Sys sys, FTSK_Fence *FSTD_MAYBE_NULL fence) {
     return fwrld_sym_sys_deinit_get()(sys, fence);
 }
 
