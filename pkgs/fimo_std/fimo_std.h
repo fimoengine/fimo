@@ -210,6 +210,12 @@ FSTD_PRAGMA_GCC(GCC diagnostic ignored "-Wgnu-alignof-expression")
 #define FSTD_CHECK_USE
 #endif
 
+#ifdef __cplusplus
+#define FSTD_CONSTEXPR constexpr
+#else
+#define FSTD_CONSTEXPR const
+#endif
+
 #if defined(FSTD_COMPILER_GCC_COMPATIBLE)
 #define fstd__typeof(x) typeof(x)
 #define fstd__alignof(x) alignof(x)
@@ -680,7 +686,7 @@ fstd_util void fstd__allocator_null_free(void *FSTD_MAYBE_NULL arg0, FSTD_Memort
     FSTD_UNUSED(arg0, arg1, arg2);
 }
 
-fstd_internal const FSTD_AllocatorVtable FSTD__AllocatorVtable_Null = {
+fstd_internal FSTD_CONSTEXPR FSTD_AllocatorVtable FSTD__AllocatorVtable_Null = {
         .alloc = fstd__allocator_null_alloc,
         .resize = fstd__allocator_null_resize,
         .remap = fstd__allocator_null_remap,
@@ -688,7 +694,7 @@ fstd_internal const FSTD_AllocatorVtable FSTD__AllocatorVtable_Null = {
 };
 
 /// An allocator which does not allocate or free any memory.
-fstd_internal const FSTD_Allocator FSTD_Allocator_Null = {
+fstd_internal FSTD_CONSTEXPR FSTD_Allocator FSTD_Allocator_Null = {
         .ptr = fstd_nullptr,
         .vtable = &FSTD__AllocatorVtable_Null,
 };
@@ -910,11 +916,11 @@ typedef struct {
     FSTD_USize (*write)(void *FSTD_MAYBE_NULL data, FSTD_Str dst, FSTD_USize offset, FSTD_USize *remaining);
 } FSTD_ResultVtable;
 
-fstd_internal const FSTD_Uuid FSTD_ResultCls_Unknown = FSTD_DEFAULT_STRUCT;
-fstd_internal const FSTD_Uuid FSTD_ResultCls_Ok = {.qwords = {FSTD_U64_MAX, FSTD_U64_MAX}};
+fstd_internal FSTD_CONSTEXPR FSTD_Uuid FSTD_ResultCls_Unknown = FSTD_DEFAULT_STRUCT;
+fstd_internal FSTD_CONSTEXPR FSTD_Uuid FSTD_ResultCls_Ok = {.qwords = {FSTD_U64_MAX, FSTD_U64_MAX}};
 fstd_external const FSTD_ResultVtable FSTD__ResultVTable_PlatformError;
 
-fstd_internal const FSTD_StrConst FSTD__Result_OkDescription = FSTD_STR("ok");
+fstd_internal FSTD_CONSTEXPR FSTD_StrConst FSTD__Result_OkDescription = FSTD_STR("ok");
 fstd_util FSTD_USize fstd__result_vtable_ok_write(void *FSTD_MAYBE_NULL arg0, FSTD_Str dst, FSTD_USize offset,
                                                   FSTD_USize *remaining) {
     FSTD_UNUSED(arg0);
@@ -927,7 +933,7 @@ fstd_util FSTD_USize fstd__result_vtable_ok_write(void *FSTD_MAYBE_NULL arg0, FS
     *remaining = remaining_str.len - written;
     return written;
 }
-fstd_internal const FSTD_ResultVtable FSTD__ResultVtable_Ok = {
+fstd_internal FSTD_CONSTEXPR FSTD_ResultVtable FSTD__ResultVtable_Ok = {
         .cls = FSTD_ResultCls_Ok,
         .deinit = fstd_nullptr,
         .write = fstd__result_vtable_ok_write,
@@ -951,7 +957,7 @@ fstd_util FSTD_USize fstd__result_vtable_error_write(void *FSTD_MAYBE_NULL data,
     *remaining = src.len - written;
     return written;
 }
-fstd_internal const FSTD_ResultVtable FSTD__ResultVtable_Error = {
+fstd_internal FSTD_CONSTEXPR FSTD_ResultVtable FSTD__ResultVtable_Error = {
         .cls = FSTD_ResultCls_Unknown,
         .deinit = fstd_nullptr,
         .write = fstd__result_vtable_error_write,
@@ -959,7 +965,6 @@ fstd_internal const FSTD_ResultVtable FSTD__ResultVtable_Error = {
 
 /// A type-erased result value.
 typedef struct {
-    // NOTE: NULL indicates success.
     void *FSTD_MAYBE_NULL data;
     const FSTD_ResultVtable *vtable;
 } FSTD_Result;
@@ -1120,10 +1125,10 @@ typedef struct {
 
 #define FSTD_SECONDS(s) {.secs = (s), .nanos = 0}
 #define FSTD_MILLIS(ms)                                                                                                \
-    {.secs = (ms) / FSTD_MILLIS_PER_SEC, .nanos = ((ms) % FSTD_MILLIS_PER_SEC) * FSTD_NANOS_PER_MILLIS}
+    {.secs = (ms) / FSTD_MILLIS_PER_SEC, .nanos = (FSTD_U32)((ms) % FSTD_MILLIS_PER_SEC) * FSTD_NANOS_PER_MILLIS}
 #define FSTD_MICROS(us)                                                                                                \
-    {.secs = (us) / FSTD_MICROS_PER_SEC, .nanos = ((us) % FSTD_MICROS_PER_SEC) * FSTD_NANOS_PER_MICROS}
-#define FSTD_NANOS(ns) {.secs = (ns) / FSTD_NANOS_PER_SEC, .nanos = (us) % FSTD_NANOS_PER_SEC}
+    {.secs = (us) / FSTD_MICROS_PER_SEC, .nanos = (FSTD_U32)((us) % FSTD_MICROS_PER_SEC) * FSTD_NANOS_PER_MICROS}
+#define FSTD_NANOS(ns) {.secs = (ns) / FSTD_NANOS_PER_SEC, .nanos = (FSTD_U32)((ns) % FSTD_NANOS_PER_SEC)}
 
 #define FSTD_DURATION_ZERO FSTD_DEFAULT_STRUCT
 #define FSTD_TIME_EPOCH FSTD_DEFAULT_STRUCT
@@ -1149,28 +1154,30 @@ fstd_external FSTD_TimeInt fstd_duration_millis(FSTD_Duration duration);
 fstd_external FSTD_TimeInt fstd_duration_micros(FSTD_Duration duration);
 fstd_external FSTD_TimeInt fstd_duration_nanos(FSTD_Duration duration);
 fstd_external FSTD_I32 fstd_duration_order(FSTD_Duration lhs, FSTD_Duration rhs);
-FSTD_CHECK_USE fstd_external FSTD_Status fstd_duration_add(FSTD_Duration *out, FSTD_Duration lhs, FSTD_Duration rhs);
+FSTD_CHECK_USE fstd_external FSTD_Result fstd_duration_add(FSTD_Duration *out, FSTD_Duration lhs, FSTD_Duration rhs);
 fstd_external FSTD_Duration fstd_duration_add_saturating(FSTD_Duration lhs, FSTD_Duration rhs);
-FSTD_CHECK_USE fstd_external FSTD_Status fstd_duration_sub(FSTD_Duration *out, FSTD_Duration lhs, FSTD_Duration rhs);
-fstd_external FSTD_Duration fstd_duration_sub_saturating(FSTD_Duration *out, FSTD_Duration lhs, FSTD_Duration rhs);
+FSTD_CHECK_USE fstd_external FSTD_Result fstd_duration_sub(FSTD_Duration *out, FSTD_Duration lhs, FSTD_Duration rhs);
+fstd_external FSTD_Duration fstd_duration_sub_saturating(FSTD_Duration lhs, FSTD_Duration rhs);
 
 fstd_external FSTD_Time fstd_time_now(void);
 fstd_external FSTD_I32 fstd_time_order(FSTD_Time lhs, FSTD_Time rhs);
-fstd_external FSTD_Result fstd_time_elapsed(FSTD_Duration *elapsed, FSTD_Time from);
-fstd_external FSTD_Result fstd_time_duration_since(FSTD_Duration *elapsed, FSTD_Time since, FSTD_Time to);
-fstd_external FSTD_Result fstd_time_add(FSTD_Time *out, FSTD_Time time, FSTD_Duration duration);
+FSTD_CHECK_USE fstd_external FSTD_Result fstd_time_elapsed(FSTD_Duration *elapsed, FSTD_Time from);
+FSTD_CHECK_USE fstd_external FSTD_Result fstd_time_duration_since(FSTD_Duration *elapsed, FSTD_Time since,
+                                                                  FSTD_Time to);
+FSTD_CHECK_USE fstd_external FSTD_Result fstd_time_add(FSTD_Time *out, FSTD_Time time, FSTD_Duration duration);
 fstd_external FSTD_Time fstd_time_add_saturating(FSTD_Time time, FSTD_Duration duration);
-fstd_external FSTD_Result fstd_time_sub(FSTD_Time *out, FSTD_Time time, FSTD_Duration duration);
+FSTD_CHECK_USE fstd_external FSTD_Result fstd_time_sub(FSTD_Time *out, FSTD_Time time, FSTD_Duration duration);
 fstd_external FSTD_Time fstd_time_sub_saturating(FSTD_Time time, FSTD_Duration duration);
 
 
 fstd_external FSTD_Instant fstd_instant_now(void);
 fstd_external FSTD_I32 fstd_instant_order(FSTD_Instant lhs, FSTD_Instant rhs);
-fstd_external FSTD_Result fstd_instant_elapsed(FSTD_Duration *elapsed, FSTD_Instant from);
-fstd_external FSTD_Result fstd_instant_duration_since(FSTD_Duration *elapsed, FSTD_Instant since, FSTD_Instant to);
-fstd_external FSTD_Result fstd_instant_add(FSTD_Instant *out, FSTD_Instant time, FSTD_Duration duration);
+FSTD_CHECK_USE fstd_external FSTD_Result fstd_instant_elapsed(FSTD_Duration *elapsed, FSTD_Instant from);
+FSTD_CHECK_USE fstd_external FSTD_Result fstd_instant_duration_since(FSTD_Duration *elapsed, FSTD_Instant since,
+                                                                     FSTD_Instant to);
+FSTD_CHECK_USE fstd_external FSTD_Result fstd_instant_add(FSTD_Instant *out, FSTD_Instant time, FSTD_Duration duration);
 fstd_external FSTD_Instant fstd_instant_add_saturating(FSTD_Instant time, FSTD_Duration duration);
-fstd_external FSTD_Result fstd_instant_sub(FSTD_Instant *out, FSTD_Instant time, FSTD_Duration duration);
+FSTD_CHECK_USE fstd_external FSTD_Result fstd_instant_sub(FSTD_Instant *out, FSTD_Instant time, FSTD_Duration duration);
 fstd_external FSTD_Instant fstd_instant_sub_saturating(FSTD_Instant time, FSTD_Duration duration);
 
 // -----------------------------------------
@@ -3745,11 +3752,520 @@ struct FSTD_Ctx {
     FSTD_TasksVtable tasks_v0;
 };
 
-FSTD_PRAGMA_GCC(GCC diagnostic pop)
-
 #ifdef __cplusplus
 }
 #endif
+
+// -----------------------------------------
+// c++ -------------------------------------
+// -----------------------------------------
+
+#ifdef __cplusplus
+#include <array>
+#include <atomic>
+#include <compare>
+#include <expected>
+#include <iterator>
+#include <memory>
+#include <optional>
+#include <string>
+#include <type_traits>
+#include <utility>
+
+namespace fstd {
+
+    using i8 = FSTD_I8;
+    using i16 = FSTD_I16;
+    using i32 = FSTD_I32;
+    using i64 = FSTD_I64;
+    using isize = FSTD_ISize;
+
+    using u8 = FSTD_U8;
+    using u16 = FSTD_U16;
+    using u32 = FSTD_U32;
+    using u64 = FSTD_U64;
+    using usize = FSTD_USize;
+
+    fstd_util auto next_pow_of_two(auto v) noexcept -> decltype(v) {
+        using T = decltype(v);
+        if constexpr (std::is_same_v<T, u8>) {
+            return fstd_next_power_of_two_u8(v);
+        }
+        else if constexpr (std::is_same_v<T, u16>) {
+            return fstd_next_power_of_two_u16(v);
+        }
+        else if constexpr (std::is_same_v<T, u32>) {
+            return fstd_next_power_of_two_u32(v);
+        }
+        else if constexpr (std::is_same_v<T, u64>) {
+            return fstd_next_power_of_two_u64(v);
+        }
+        else if constexpr (std::is_same_v<T, usize>) {
+            return fstd_next_power_of_two_usize(v);
+        }
+        else {
+            static_assert(false, "invalid unsigned integer");
+        }
+    }
+
+    fstd_util auto is_pow_of_two(auto v) noexcept -> bool {
+        using T = decltype(v);
+        if constexpr (std::is_same_v<T, u8>) {
+            return fstd_is_power_of_two_u8(v);
+        }
+        else if constexpr (std::is_same_v<T, u16>) {
+            return fstd_is_power_of_two_u16(v);
+        }
+        else if constexpr (std::is_same_v<T, u32>) {
+            return fstd_is_power_of_two_u32(v);
+        }
+        else if constexpr (std::is_same_v<T, u64>) {
+            return fstd_is_power_of_two_u64(v);
+        }
+        else if constexpr (std::is_same_v<T, usize>) {
+            return fstd_is_power_of_two_usize(v);
+        }
+        else {
+            static_assert(false, "invalid unsigned integer");
+        }
+    }
+
+    template<typename T>
+    struct Slice {
+        T *ptr;
+        usize len;
+
+        using element_type = T;
+        using value_type = std::remove_cv_t<T>;
+        using size_type = usize;
+        using difference_type = isize;
+        using pointer = T *;
+        using const_pointer = const T *;
+        using reference = T &;
+        using const_reference = const T &;
+        using iterator = T *;
+        using const_iterator = const T *;
+        using reverse_iterator = std::reverse_iterator<iterator>;
+        using const_reverse_iterator = std::reverse_iterator<const T *>;
+
+        inline constexpr Slice() noexcept = default;
+        template<std::enable_if_t<std::is_same_v<std::remove_cv_t<T>, char>, bool> = true>
+        inline constexpr Slice(T *it) noexcept : ptr{it}, len{std::char_traits<T>::length(it)} {}
+        template<typename It>
+        inline constexpr Slice(It first, usize count) noexcept : ptr{std::to_address(first)}, len{count} {}
+        template<typename It, typename End>
+        inline constexpr Slice(It first, End last) noexcept : ptr{std::to_address(first)}, len{last - first} {}
+        template<usize N>
+        inline constexpr Slice(std::type_identity_t<T> (&arr)[N]) noexcept : ptr{arr}, len{N} {}
+        template<typename U, usize N>
+        inline constexpr Slice(std::array<U, N> &arr) noexcept : ptr{arr.data()}, len{N} {}
+        template<typename U, usize N>
+        inline constexpr Slice(const std::array<U, N> &arr) noexcept : ptr{arr.data()}, len{N} {}
+        inline constexpr Slice(const Slice &) noexcept = default;
+        inline constexpr Slice(Slice &&) noexcept = default;
+
+        inline constexpr Slice &operator=(const Slice &) noexcept = default;
+        inline constexpr Slice &operator=(Slice &&) noexcept = default;
+
+        inline constexpr auto begin() const noexcept -> iterator { return ptr; }
+        inline constexpr auto cbegin() const noexcept -> const_iterator { return ptr; }
+
+        inline constexpr auto end() const noexcept -> iterator { return ptr + len; }
+        inline constexpr auto cend() const noexcept -> const_iterator { return ptr + len; }
+
+        inline constexpr auto rbegin() const noexcept -> reverse_iterator { return ptr + len; }
+        inline constexpr auto crbegin() const noexcept -> const_reverse_iterator { return ptr + len; }
+
+        inline constexpr auto rend() const noexcept -> reverse_iterator { return ptr; }
+        inline constexpr auto crend() const noexcept -> const_reverse_iterator { return ptr; }
+
+        inline constexpr auto front() const noexcept -> reference { return ptr[0]; }
+        inline constexpr auto back() const noexcept -> reference { return ptr[len - 1]; }
+        inline constexpr auto operator[](usize idx) const noexcept -> reference { return ptr[idx]; }
+        inline constexpr auto data() const noexcept -> pointer { return ptr; }
+        inline constexpr auto size() const noexcept -> usize { return len; }
+        inline constexpr auto size_bytes() const noexcept -> usize { return len * sizeof(*ptr); }
+        inline constexpr auto empty() const noexcept -> bool { return len == 0; }
+
+        template<typename U>
+        inline operator U() const noexcept {
+            return {.ptr = this->ptr, .len = this->len};
+        }
+    };
+
+    using Uuid = FSTD_Uuid;
+
+    // -----------------------------------------
+    // memory ----------------------------------
+    // -----------------------------------------
+
+    struct Allocator : FSTD_Allocator {
+        template<typename T>
+        FSTD_ALLOC inline auto alloc(usize n) const noexcept -> T *FSTD_MAYBE_NULL {
+            return static_cast<T *>(this->vtable->alloc(this->ptr, sizeof(T) * n, alignof(T)));
+        }
+        template<typename T>
+        inline auto resize(T *ptr, usize n, usize new_n) const noexcept -> bool {
+            return this->vtable->resize(ptr, sizeof(T) * n, alignof(T), sizeof(T) * new_n);
+        }
+        template<typename T>
+        FSTD_ALLOC inline auto remap(T *ptr, usize n, usize new_n) const noexcept -> T *FSTD_MAYBE_NULL {
+            return this->vtable->remap(ptr, sizeof(T) * n, alignof(T), sizeof(T) * new_n);
+        }
+        template<typename T>
+        inline auto free(T *ptr, usize n) const noexcept -> void {
+            return this->vtable->free(ptr, sizeof(T) * n, alignof(T));
+        }
+        template<typename T>
+        FSTD_ALLOC inline auto create() const noexcept -> T *FSTD_MAYBE_NULL {
+            return this->alloc<T>(1);
+        }
+        template<typename T>
+        inline auto destroy(T *ptr) const noexcept -> void {
+            return this->free(ptr, 1);
+        }
+    };
+    static constexpr Allocator Allocator_Null = {FSTD_Allocator_Null};
+
+    struct Arena : FSTD_Arena {
+        using Flags = FSTD_ArenaFlags;
+
+        inline Arena() noexcept = default;
+        inline Arena(const Arena &) = delete;
+        inline Arena(Arena &&other) noexcept :
+            FSTD_Arena{
+                    .grow_futex = other.grow_futex.load(std::memory_order_relaxed),
+                    .flags = other.flags,
+                    .page_size = other.page_size,
+                    .commit_len = other.commit_len.exchange(0, std::memory_order_relaxed),
+                    .ptr = std::exchange(other.ptr, nullptr),
+                    .pos = other.pos.exchange(0, std::memory_order_relaxed),
+            } {}
+        inline ~Arena() noexcept {
+            if (this->ptr)
+                fstd_arena_deinit(this);
+        }
+
+        inline constexpr Arena &operator=(const Arena &) noexcept = delete;
+        inline constexpr Arena &operator=(Arena &&other) noexcept {
+            if (this != &other) {
+                if (this->ptr)
+                    fstd_arena_deinit(this);
+                this->grow_futex = other.grow_futex.load(std::memory_order_relaxed);
+                this->flags = other.flags;
+                this->page_size = other.page_size;
+                this->commit_len = other.commit_len.exchange(0, std::memory_order_relaxed);
+                this->ptr = std::exchange(other.ptr, nullptr);
+                this->pos = other.pos.exchange(0, std::memory_order_relaxed);
+            }
+            return *this;
+        };
+
+        static inline auto init(void *base, Flags flags, usize reserve, usize commit) noexcept -> std::optional<Arena> {
+            Arena arena{};
+            if (!fstd_arena_init(&arena, base, flags, reserve, commit))
+                return std::nullopt;
+            return arena;
+        }
+        static inline auto init(Flags flags, usize reserve, usize commit) noexcept -> std::optional<Arena> {
+            return init(nullptr, flags, reserve, commit);
+        }
+        static inline auto init(usize reserve, usize commit) noexcept -> std::optional<Arena> {
+            return init(nullptr, 0, reserve, commit);
+        }
+        static inline auto init(Flags flags, usize size) noexcept -> std::optional<Arena> {
+            return init(nullptr, flags, size, size);
+        }
+        static inline auto init(usize size) noexcept -> std::optional<Arena> { return init(nullptr, 0, size, size); }
+
+        inline auto grow(usize new_size) noexcept -> void { fstd_arena_grow(this, new_size); }
+
+        template<typename T>
+        inline auto push(usize n) noexcept -> T * {
+            return static_cast<T *>(fstd__arena_push(this, sizeof(T) * n, alignof(T)));
+        }
+        template<typename T>
+        inline auto push_zero(usize n) noexcept -> T * {
+            return static_cast<T *>(fstd__arena_push_zero(this, sizeof(T) * n, alignof(T)));
+        }
+        template<typename T>
+        inline auto pop(usize n) noexcept -> void {
+            return fstd__arena_pop(this, sizeof(T) * n);
+        }
+        template<typename T>
+        inline auto resize(T FSTD_MAYBE_NULL *ptr, usize n, usize new_n) noexcept -> bool {
+            return fstd__arena_resize(this, ptr, sizeof(T) * n, sizeof(T) * new_n);
+        }
+        template<typename T>
+        inline auto remap(T FSTD_MAYBE_NULL *ptr, usize n, usize new_n) noexcept -> T *FSTD_MAYBE_NULL {
+            return fstd__arena_remap(this, ptr, sizeof(T) * n, alignof(T), sizeof(T) * new_n);
+        }
+        template<typename T>
+        inline auto free(T FSTD_MAYBE_NULL *ptr, usize n) noexcept -> void {
+            return fstd__arena_free(this, ptr, sizeof(T) * n);
+        }
+
+        inline auto get_pos() noexcept -> usize { return fstd_arena_get_pos(this); }
+        inline auto set_pos(usize pos) noexcept -> void { return fstd_arena_set_pos(this, pos); }
+    };
+
+    // -----------------------------------------
+    // errors ----------------------------------
+    // -----------------------------------------
+
+    // NOLINTNEXTLINE(performance-enum-size)
+    enum class Status : i32 {
+        Ok = FSTD_Status_Ok,
+        Failure = FSTD_Status_Failure,
+        FailureUnknown = FSTD_Status_FailureNoReport,
+    };
+
+    enum class PlatformError : FSTD_PlatformError {};
+
+    struct Result : FSTD_Result {
+        inline Result() noexcept : FSTD_Result{FSTD_Result_Ok} {};
+        template<typename T>
+        inline Result(T) noexcept;
+        inline Result(FSTD_Result result) : FSTD_Result{result} {};
+        inline Result(const Result &) = delete;
+        inline Result(Result &&other) noexcept :
+            FSTD_Result{
+                    .data = std::exchange(other.data, nullptr),
+                    .vtable = std::exchange(other.vtable, nullptr),
+            } {}
+        inline ~Result() noexcept {
+            if (this->vtable)
+                fstd_result_deinit(*this);
+        }
+
+        template<>
+        inline Result(PlatformError err) noexcept :
+            FSTD_Result{fstd_result_init_platform_error(static_cast<FSTD_PlatformError>(err))} {}
+
+        inline constexpr auto operator=(const Result &) noexcept -> Result & = delete;
+        inline auto operator=(Result &&other) noexcept -> Result & {
+            if (this != &other) {
+                if (this->vtable)
+                    fstd_result_deinit(*this);
+                this->data = std::exchange(other.data, nullptr);
+                this->vtable = std::exchange(other.vtable, nullptr);
+            }
+            return *this;
+        };
+
+        inline constexpr auto is_ok() const noexcept -> bool {
+            return this->vtable->cls.qwords[0] == FSTD_U64_MAX && this->vtable->cls.qwords[1] == FSTD_U64_MAX;
+        }
+        inline constexpr auto is_err() const noexcept -> bool { return !this->is_ok(); }
+        inline auto write(Slice<char> dst, usize offset, usize &remaining) const noexcept -> usize {
+            return fstd_result_write(*this, dst, offset, &remaining);
+        }
+    };
+
+    // -----------------------------------------
+    // time ------------------------------------
+    // -----------------------------------------
+
+    using TimeInt = FSTD_TimeInt;
+
+    struct Duration : FSTD_Duration {
+        static constexpr inline auto init_secs(u64 s) -> Duration { return {FSTD_SECONDS(s)}; }
+        static constexpr inline auto init_millis(u64 ms) -> Duration { return {FSTD_MILLIS(ms)}; }
+        static constexpr inline auto init_micros(u64 us) -> Duration { return {FSTD_MICROS(us)}; }
+        static constexpr inline auto init_nanos(u64 ns) -> Duration { return {FSTD_NANOS(ns)}; }
+
+        inline auto secs() const noexcept -> u64 { return fstd_duration_secs(*this); }
+        inline auto subsec_millis() const noexcept -> u32 { return fstd_duration_subsec_millis(*this); }
+        inline auto subsec_micros() const noexcept -> u32 { return fstd_duration_subsec_micros(*this); }
+        inline auto subsec_nanos() const noexcept -> u32 { return fstd_duration_subsec_nanos(*this); }
+        inline auto millis() const noexcept -> TimeInt { return fstd_duration_millis(*this); }
+        inline auto micros() const noexcept -> TimeInt { return fstd_duration_micros(*this); }
+        inline auto nanos() const noexcept -> TimeInt { return fstd_duration_nanos(*this); }
+
+        inline auto add(Duration other) const noexcept -> std::expected<Duration, Result> {
+            Duration result{};
+            Result status = fstd_duration_add(&result, *this, other);
+            if (status.is_err())
+                return std::unexpected(std::move(status));
+            return result;
+        }
+        inline auto add_sat(Duration other) const noexcept -> Duration {
+            return {fstd_duration_add_saturating(*this, other)};
+        }
+
+        inline auto sub(Duration other) const noexcept -> std::expected<Duration, Result> {
+            Duration result{};
+            Result status = fstd_duration_sub(&result, *this, other);
+            if (status.is_err())
+                return std::unexpected(std::move(status));
+            return result;
+        }
+        inline auto sub_sat(Duration other) const noexcept -> Duration {
+            return {fstd_duration_sub_saturating(*this, other)};
+        }
+
+        inline auto operator+(Duration other) const noexcept -> Duration { return this->add_sat(other); }
+        inline auto operator+=(Duration other) noexcept -> Duration & {
+            *this = this->add_sat(other);
+            return *this;
+        }
+
+        inline auto operator-(Duration other) const noexcept -> Duration { return this->sub_sat(other); }
+        inline auto operator-=(Duration other) noexcept -> Duration & {
+            *this = this->sub_sat(other);
+            return *this;
+        }
+
+        inline friend constexpr std::strong_ordering operator<=>(Duration lhs, Duration rhs) {
+            if (lhs.secs() < rhs.secs())
+                return std::strong_ordering::less;
+            if (lhs.secs() > rhs.secs())
+                return std::strong_ordering::greater;
+            if (lhs.subsec_nanos() < rhs.subsec_nanos())
+                return std::strong_ordering::less;
+            if (lhs.subsec_nanos() > rhs.subsec_nanos())
+                return std::strong_ordering::greater;
+            return std::strong_ordering::equivalent;
+        }
+    };
+    inline static constexpr Duration DurationZero = {};
+    inline static constexpr Duration DurationMax = {FSTD_DURATION_MAX};
+
+    struct Time : FSTD_Time {
+        static inline auto now() noexcept -> Time { return {fstd_time_now()}; }
+        static inline auto elapsed(Time from) noexcept -> std::expected<Duration, Result> {
+            Duration elapsed{};
+            Result result = fstd_time_elapsed(&elapsed, from);
+            if (result.is_err())
+                return std::unexpected(std::move(result));
+            return elapsed;
+        }
+
+        inline auto duration_since(Time since) const noexcept -> std::expected<Duration, Result> {
+            Duration elapsed{};
+            Result result = fstd_time_duration_since(&elapsed, since, *this);
+            if (result.is_err())
+                return std::unexpected(std::move(result));
+            return elapsed;
+        }
+
+        inline auto add(Duration rhs) const noexcept -> std::expected<Time, Result> {
+            Time time{};
+            Result result = fstd_time_add(&time, *this, rhs);
+            if (result.is_err())
+                return std::unexpected(std::move(result));
+            return time;
+        }
+        inline auto add_sat(Duration rhs) const noexcept -> Time { return {fstd_time_add_saturating(*this, rhs)}; }
+
+        inline auto sub(Duration rhs) const noexcept -> std::expected<Time, Result> {
+            Time time{};
+            Result result = fstd_time_sub(&time, *this, rhs);
+            if (result.is_err())
+                return std::unexpected(std::move(result));
+            return time;
+        }
+        inline auto sub_sat(Duration rhs) const noexcept -> Time { return {fstd_time_sub_saturating(*this, rhs)}; }
+
+        inline auto operator+(Duration other) const noexcept -> Time { return this->add_sat(other); }
+        inline auto operator+=(Duration other) noexcept -> Time & {
+            *this = this->add_sat(other);
+            return *this;
+        }
+
+        inline auto operator-(Duration other) const noexcept -> Time { return this->sub_sat(other); }
+        inline auto operator-=(Duration other) noexcept -> Time & {
+            *this = this->sub_sat(other);
+            return *this;
+        }
+
+        inline friend constexpr std::strong_ordering operator<=>(Time lhs, Time rhs) {
+            if (lhs.secs < rhs.secs)
+                return std::strong_ordering::less;
+            if (lhs.secs > rhs.secs)
+                return std::strong_ordering::greater;
+            if (lhs.nanos < rhs.nanos)
+                return std::strong_ordering::less;
+            if (lhs.nanos > rhs.nanos)
+                return std::strong_ordering::greater;
+            return std::strong_ordering::equivalent;
+        }
+    };
+    inline static constexpr Time TimeEpoch = {};
+    inline static constexpr Time TimeZero = {};
+    inline static constexpr Time TimeMax = {FSTD_TIME_MAX};
+
+    struct Instant : FSTD_Instant {
+        static inline auto now() noexcept -> Instant { return {fstd_instant_now()}; }
+        static inline auto elapsed(Instant from) noexcept -> std::expected<Duration, Result> {
+            Duration elapsed{};
+            Result result = fstd_instant_elapsed(&elapsed, from);
+            if (result.is_err())
+                return std::unexpected(std::move(result));
+            return elapsed;
+        }
+
+        inline auto duration_since(Instant since) const noexcept -> std::expected<Duration, Result> {
+            Duration elapsed{};
+            Result result = fstd_instant_duration_since(&elapsed, since, *this);
+            if (result.is_err())
+                return std::unexpected(std::move(result));
+            return elapsed;
+        }
+
+        inline auto add(Duration rhs) const noexcept -> std::expected<Instant, Result> {
+            Instant time{};
+            Result result = fstd_instant_add(&time, *this, rhs);
+            if (result.is_err())
+                return std::unexpected(std::move(result));
+            return time;
+        }
+        inline auto add_sat(Duration rhs) const noexcept -> Instant {
+            return {fstd_instant_add_saturating(*this, rhs)};
+        }
+
+        inline auto sub(Duration rhs) const noexcept -> std::expected<Instant, Result> {
+            Instant time{};
+            Result result = fstd_instant_sub(&time, *this, rhs);
+            if (result.is_err())
+                return std::unexpected(std::move(result));
+            return time;
+        }
+        inline auto sub_sat(Duration rhs) const noexcept -> Instant {
+            return {fstd_instant_sub_saturating(*this, rhs)};
+        }
+
+        inline auto operator+(Duration other) const noexcept -> Instant { return this->add_sat(other); }
+        inline auto operator+=(Duration other) noexcept -> Instant & {
+            *this = this->add_sat(other);
+            return *this;
+        }
+
+        inline auto operator-(Duration other) const noexcept -> Instant { return this->sub_sat(other); }
+        inline auto operator-=(Duration other) noexcept -> Instant & {
+            *this = this->sub_sat(other);
+            return *this;
+        }
+
+        inline friend constexpr std::strong_ordering operator<=>(Instant lhs, Instant rhs) {
+            if (lhs.secs < rhs.secs)
+                return std::strong_ordering::less;
+            if (lhs.secs > rhs.secs)
+                return std::strong_ordering::greater;
+            if (lhs.nanos < rhs.nanos)
+                return std::strong_ordering::less;
+            if (lhs.nanos > rhs.nanos)
+                return std::strong_ordering::greater;
+            return std::strong_ordering::equivalent;
+        }
+    };
+    inline static constexpr Instant InstantZero = {};
+    inline static constexpr Instant InstantMax = {FSTD_INSTANT_MAX};
+
+} // namespace fstd
+#endif
+
+FSTD_PRAGMA_GCC(GCC diagnostic pop)
 
 #ifdef FIMO_STD_IMPLEMENTATION
 

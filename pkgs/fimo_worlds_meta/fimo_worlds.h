@@ -241,7 +241,7 @@ FSTD_SYM_FN(FWRLD_Sym_SysDeinit, FWRLD__SYM_ID("sys_deinit"), void, FWRLD_Sys sy
 
 #ifdef __cplusplus
 
-namespace fimo_worlds {
+namespace fworlds {
     /// A handle to a resource in a world.
     ///
     /// The handle uniquely identifies the resource in the world.
@@ -261,7 +261,7 @@ namespace fimo_worlds {
     template<typename T>
     [[nodiscard]]
     fstd_util auto world_add_res(FWRLD_World world, const ResDesc<T> &desc) noexcept -> Res<T> * {
-        FWRLD_Res res = fwrld_world_add_res(world, &desc);
+        FWRLD_Res res = fwrld_world_add_res(world, reinterpret_cast<const FWRLD_ResDesc *>(&desc));
         return reinterpret_cast<Res<T> *>(res);
     }
 
@@ -304,7 +304,7 @@ namespace fimo_worlds {
     fstd_util auto resource_unlock_write(Res<T> *res) noexcept -> void {
         return fwrld_resource_unlock_write(reinterpret_cast<FWRLD_Res>(res));
     }
-} // namespace fimo_worlds
+} // namespace fworlds
 
 #endif
 
