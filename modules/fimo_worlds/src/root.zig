@@ -479,7 +479,7 @@ pub const Sys = struct {
             self.after_subset = block.next;
             for (block.entries) |opt_sys| {
                 const sys = opt_sys orelse break;
-                sys.before.?.remove(self);
+                if (sys.before) |before| before.remove(self);
             }
             scheduler.deallocSysBlock(block);
         }
