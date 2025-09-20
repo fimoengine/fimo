@@ -655,80 +655,50 @@ fstd_util void ftsk_timeline_semaphore_signal(FTSK_TimelineSemaphore *tsem, FSTD
 }
 
 #define FTSK_SYM_NS "fimo-tasks"
-#define FTSK__SYM_VERSION FSTD_CTX_VERSION
+#define FTSK__SYM_ID(name) FSTD_MODULE_SYMBOL_NS(name, FTSK_SYM_NS, FSTD_CTX_VERSION)
 #define FTSK_SYM_ALL                                                                                                   \
-    ftsk_sym_task_id_symbol, ftsk_sym_worker_id_symbol, ftsk_sym_yield_symbol, ftsk_sym_abort_symbol,                  \
-            ftsk_sym_cancel_requested_symbol, ftsk_sym_sleep_symbol, ftsk_sym_task_arena_symbol,                       \
-            ftsk_sym_task_local_set_symbol, ftsk_sym_task_local_get_symbol, ftsk_sym_task_local_clear_symbol,          \
-            ftsk_sym_cmd_buf_join_symbol, ftsk_sym_cmd_buf_detach_symbol, ftsk_sym_cmd_buf_cancel_symbol,              \
-            ftsk_sym_cmd_buf_cancel_detach_symbol, ftsk_sym_executor_global_symbol, ftsk_sym_executor_init_symbol,     \
-            ftsk_sym_executor_current_symbol, ftsk_sym_executor_join_symbol, ftsk_sym_executor_join_requested_symbol,  \
-            ftsk_sym_executor_enqueue_symbol, ftsk_sym_executor_enqueue_detached_symbol, ftsk_sym_futex_wait_symbol,   \
-            ftsk_sym_futex_waitv_symbol, ftsk_sym_futex_wake_symbol, ftsk_sym_futex_requeue_symbol
+    FTSK_Sym_TaskId, FTSK_Sym_WorkerId, FTSK_Sym_Yield, FTSK_Sym_Abort, FTSK_Sym_CancelRequested, FTSK_Sym_Sleep,      \
+            FTSK_Sym_TaskArena, FTSK_Sym_TaskLocalSet, FTSK_Sym_TaskLocalGet, FTSK_Sym_TaskLocalClear,                 \
+            FTSK_Sym_CmdBufJoin, FTSK_Sym_CmdBufDetach, FTSK_Sym_CmdBufCancel, FTSK_Sym_CmdBufCancelDetach,            \
+            FTSK_Sym_ExecutorGlobal, FTSK_Sym_ExecutorInit, FTSK_Sym_ExecutorCurrent, FTSK_Sym_ExecutorJoin,           \
+            FTSK_Sym_ExecutorJoinRequested, FTSK_Sym_ExecutorEnqueue, FTSK_Sym_ExecutorEnqueueDetached,                \
+            FTSK_Sym_FutexWait, FTSK_Sym_FutexWaitv, FTSK_Sym_FutexWake, FTSK_Sym_FutexRequeue
 
-#define FTSK_SYM_TASK_ID FSTD_MODULE_SYMBOL_NS("task_id", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_WORKER_ID FSTD_MODULE_SYMBOL_NS("worker_id", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_YIELD FSTD_MODULE_SYMBOL_NS("yield", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_ABORT FSTD_MODULE_SYMBOL_NS("abort", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_CANCEL_REQUESTED FSTD_MODULE_SYMBOL_NS("cancel_requested", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_SLEEP FSTD_MODULE_SYMBOL_NS("sleep", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_TASK_ARENA FSTD_MODULE_SYMBOL_NS("task_arena", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_TASK_LOCAL_SET FSTD_MODULE_SYMBOL_NS("task_local_set", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_TASK_LOCAL_GET FSTD_MODULE_SYMBOL_NS("task_local_get", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_TASK_LOCAL_CLEAR FSTD_MODULE_SYMBOL_NS("task_local_clear", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_CMD_BUF_JOIN FSTD_MODULE_SYMBOL_NS("cmd_buf_join", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_CMD_BUF_DETACH FSTD_MODULE_SYMBOL_NS("cmd_buf_detach", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_CMD_BUF_CANCEL FSTD_MODULE_SYMBOL_NS("cmd_buf_cancel", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_CMD_BUF_CANCEL_DETACH FSTD_MODULE_SYMBOL_NS("cmd_buf_cancel_detach", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_EXECUTOR_GLOBAL FSTD_MODULE_SYMBOL_NS("executor_global", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_EXECUTOR_INIT FSTD_MODULE_SYMBOL_NS("executor_init", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_EXECUTOR_CURRENT FSTD_MODULE_SYMBOL_NS("executor_current", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_EXECUTOR_JOIN FSTD_MODULE_SYMBOL_NS("executor_join", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_EXECUTOR_JOIN_REQUESTED                                                                               \
-    FSTD_MODULE_SYMBOL_NS("executor_join_requested", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_EXECUTOR_ENQUEUE FSTD_MODULE_SYMBOL_NS("executor_enqueue", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_EXECUTOR_ENQUEUE_DETACHED                                                                             \
-    FSTD_MODULE_SYMBOL_NS("executor_enqueue_detached", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_FUTEX_WAIT FSTD_MODULE_SYMBOL_NS("futex_wait", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_FUTEX_WAIT_V FSTD_MODULE_SYMBOL_NS("futex_waitv", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_FUTEX_WAKE FSTD_MODULE_SYMBOL_NS("futex_wake", FTSK_SYM_NS, FTSK__SYM_VERSION)
-#define FTSK_SYM_FUTEX_REQUEUE FSTD_MODULE_SYMBOL_NS("futex_requeue", FTSK_SYM_NS, FTSK__SYM_VERSION)
-
-FSTD_SYMBOL_FN(FTSK_SYM_TASK_ID, ftsk_sym_, bool, task_id, FTSK_TaskId *id)
-FSTD_SYMBOL_FN(FTSK_SYM_WORKER_ID, ftsk_sym_, bool, worker_id, FTSK_Worker *id)
-FSTD_SYMBOL_FN(FTSK_SYM_YIELD, ftsk_sym_, void, yield, void)
-FSTD_SYMBOL_FN(FTSK_SYM_ABORT, ftsk_sym_, void, abort, void)
-FSTD_SYMBOL_FN(FTSK_SYM_CANCEL_REQUESTED, ftsk_sym_, bool, cancel_requested, void)
-FSTD_SYMBOL_FN(FTSK_SYM_SLEEP, ftsk_sym_, void, sleep, FSTD_Duration duration)
-FSTD_SYMBOL_FN(FTSK_SYM_TASK_ARENA, ftsk_sym_, FSTD_Arena *FSTD_MAYBE_NULL, task_arena, void)
-FSTD_SYMBOL_FN(FTSK_SYM_TASK_LOCAL_SET, ftsk_sym_, void, task_local_set, const FTSK_TssKey *key,
-               void *FSTD_MAYBE_NULL value, FTSK_TssKeyDtor FSTD_MAYBE_NULL dtor)
-FSTD_SYMBOL_FN(FTSK_SYM_TASK_LOCAL_GET, ftsk_sym_, void *FSTD_MAYBE_NULL, task_local_get, const FTSK_TssKey *key)
-FSTD_SYMBOL_FN(FTSK_SYM_TASK_LOCAL_CLEAR, ftsk_sym_, void, task_local_clear, const FTSK_TssKey *key)
-FSTD_SYMBOL_FN(FTSK_SYM_CMD_BUF_JOIN, ftsk_sym_, FTSK_CmdBufHandleCompletionStatus, cmd_buf_join,
-               FTSK_CmdBufHandle *cmd_buf)
-FSTD_SYMBOL_FN(FTSK_SYM_CMD_BUF_DETACH, ftsk_sym_, void, cmd_buf_detach, FTSK_CmdBufHandle *cmd_buf)
-FSTD_SYMBOL_FN(FTSK_SYM_CMD_BUF_CANCEL, ftsk_sym_, void, cmd_buf_cancel, FTSK_CmdBufHandle *cmd_buf)
-FSTD_SYMBOL_FN(FTSK_SYM_CMD_BUF_CANCEL_DETACH, ftsk_sym_, void, cmd_buf_cancel_detach, FTSK_CmdBufHandle *cmd_buf)
-FSTD_SYMBOL(FTSK_SYM_EXECUTOR_GLOBAL, ftsk_sym_, FTSK_Executor, executor_global)
-FSTD_SYMBOL_FN(FTSK_SYM_EXECUTOR_INIT, ftsk_sym_, FSTD_Status, executor_init, FTSK_Executor **exe,
-               const FTSK_ExecutorCfg *cfg)
-FSTD_SYMBOL_FN(FTSK_SYM_EXECUTOR_CURRENT, ftsk_sym_, FTSK_Executor *FSTD_MAYBE_NULL, executor_current)
-FSTD_SYMBOL_FN(FTSK_SYM_EXECUTOR_JOIN, ftsk_sym_, void, executor_join, FTSK_Executor *exe)
-FSTD_SYMBOL_FN(FTSK_SYM_EXECUTOR_JOIN_REQUESTED, ftsk_sym_, bool, executor_join_requested, FTSK_Executor *exe)
-FSTD_SYMBOL_FN(FTSK_SYM_EXECUTOR_ENQUEUE, ftsk_sym_, FTSK_CmdBufHandle *, executor_enqueue, FTSK_Executor *exe,
-               FTSK_CmdBuf *cmd_buf)
-FSTD_SYMBOL_FN(FTSK_SYM_EXECUTOR_ENQUEUE_DETACHED, ftsk_sym_, void, executor_enqueue_detached, FTSK_Executor *exe,
-               FTSK_CmdBuf *cmd_buf)
-FSTD_SYMBOL_FN(FTSK_SYM_FUTEX_WAIT, ftsk_sym_, FTSK_FutexStatus, futex_wait, const void *key, FSTD_USize key_size,
-               FSTD_U64 expect, FSTD_USize token, const FSTD_Instant *FSTD_MAYBE_NULL timeout)
-FSTD_SYMBOL_FN(FTSK_SYM_FUTEX_WAIT_V, ftsk_sym_, FTSK_FutexStatus, futex_waitv, FTSK_FutexKeyExpectSlice keys,
-               const FSTD_Instant *FSTD_MAYBE_NULL timeout, FSTD_USize *wake_index)
-FSTD_SYMBOL_FN(FTSK_SYM_FUTEX_WAKE, ftsk_sym_, FSTD_USize, futex_wake, const void *key, FSTD_USize max_waiters,
-               FTSK_FutexFilter filter)
-FSTD_SYMBOL_FN(FTSK_SYM_FUTEX_REQUEUE, ftsk_sym_, FTSK_FutexStatus, futex_requeue, const void *key_from,
-               const void *key_to, FSTD_USize key_size, FSTD_U64 expect, FSTD_USize max_wakes, FSTD_USize max_requeues,
-               FTSK_FutexFilter filter, FTSK_FutexRequeueResult *result)
+FSTD_SYM_FN(FTSK_Sym_TaskId, FTSK__SYM_ID("task_id"), bool, FTSK_TaskId *id)
+FSTD_SYM_FN(FTSK_Sym_WorkerId, FTSK__SYM_ID("worker_id"), bool, FTSK_Worker *id)
+FSTD_SYM_FN(FTSK_Sym_Yield, FTSK__SYM_ID("yield"), void, void)
+FSTD_SYM_FN(FTSK_Sym_Abort, FTSK__SYM_ID("abort"), void, void)
+FSTD_SYM_FN(FTSK_Sym_CancelRequested, FTSK__SYM_ID("cancel_requested"), bool, void)
+FSTD_SYM_FN(FTSK_Sym_Sleep, FTSK__SYM_ID("sleep"), void, FSTD_Duration duration)
+FSTD_SYM_FN(FTSK_Sym_TaskArena, FTSK__SYM_ID("task_arena"), FSTD_Arena *FSTD_MAYBE_NULL, void)
+FSTD_SYM_FN(FTSK_Sym_TaskLocalSet, FTSK__SYM_ID("task_local_set"), void, const FTSK_TssKey *key,
+            void *FSTD_MAYBE_NULL value, FTSK_TssKeyDtor FSTD_MAYBE_NULL dtor)
+FSTD_SYM_FN(FTSK_Sym_TaskLocalGet, FTSK__SYM_ID("task_local_get"), void *FSTD_MAYBE_NULL, const FTSK_TssKey *key)
+FSTD_SYM_FN(FTSK_Sym_TaskLocalClear, FTSK__SYM_ID("task_local_clear"), void, const FTSK_TssKey *key)
+FSTD_SYM_FN(FTSK_Sym_CmdBufJoin, FTSK__SYM_ID("cmd_buf_join"), FTSK_CmdBufHandleCompletionStatus,
+            FTSK_CmdBufHandle *cmd_buf)
+FSTD_SYM_FN(FTSK_Sym_CmdBufDetach, FTSK__SYM_ID("cmd_buf_detach"), void, FTSK_CmdBufHandle *cmd_buf)
+FSTD_SYM_FN(FTSK_Sym_CmdBufCancel, FTSK__SYM_ID("cmd_buf_cancel"), void, FTSK_CmdBufHandle *cmd_buf)
+FSTD_SYM_FN(FTSK_Sym_CmdBufCancelDetach, FTSK__SYM_ID("cmd_buf_cancel_detach"), void, FTSK_CmdBufHandle *cmd_buf)
+FSTD_SYM(FTSK_Sym_ExecutorGlobal, FTSK__SYM_ID("executor_global"), FTSK_Executor)
+FSTD_SYM_FN(FTSK_Sym_ExecutorInit, FTSK__SYM_ID("executor_init"), FSTD_Status, FTSK_Executor **exe,
+            const FTSK_ExecutorCfg *cfg)
+FSTD_SYM_FN(FTSK_Sym_ExecutorCurrent, FTSK__SYM_ID("executor_current"), FTSK_Executor *FSTD_MAYBE_NULL, void)
+FSTD_SYM_FN(FTSK_Sym_ExecutorJoin, FTSK__SYM_ID("executor_join"), void, FTSK_Executor *exe)
+FSTD_SYM_FN(FTSK_Sym_ExecutorJoinRequested, FTSK__SYM_ID("executor_join_requested"), bool, FTSK_Executor *exe)
+FSTD_SYM_FN(FTSK_Sym_ExecutorEnqueue, FTSK__SYM_ID("executor_enqueue"), FTSK_CmdBufHandle *, FTSK_Executor *exe,
+            FTSK_CmdBuf *cmd_buf)
+FSTD_SYM_FN(FTSK_Sym_ExecutorEnqueueDetached, FTSK__SYM_ID("executor_enqueue_detached"), void, FTSK_Executor *exe,
+            FTSK_CmdBuf *cmd_buf)
+FSTD_SYM_FN(FTSK_Sym_FutexWait, FTSK__SYM_ID("futex_wait"), FTSK_FutexStatus, const void *key, FSTD_USize key_size,
+            FSTD_U64 expect, FSTD_USize token, const FSTD_Instant *FSTD_MAYBE_NULL timeout)
+FSTD_SYM_FN(FTSK_Sym_FutexWaitv, FTSK__SYM_ID("futex_waitv"), FTSK_FutexStatus, FTSK_FutexKeyExpectSlice keys,
+            const FSTD_Instant *FSTD_MAYBE_NULL timeout, FSTD_USize *wake_index)
+FSTD_SYM_FN(FTSK_Sym_FutexWake, FTSK__SYM_ID("futex_wake"), FSTD_USize, const void *key, FSTD_USize max_waiters,
+            FTSK_FutexFilter filter)
+FSTD_SYM_FN(FTSK_Sym_FutexRequeue, FTSK__SYM_ID("futex_requeue"), FTSK_FutexStatus, const void *key_from,
+            const void *key_to, FSTD_USize key_size, FSTD_U64 expect, FSTD_USize max_wakes, FSTD_USize max_requeues,
+            FTSK_FutexFilter filter, FTSK_FutexRequeueResult *result)
 
 #ifdef __cplusplus
 }
@@ -740,117 +710,112 @@ FSTD_SYMBOL_FN(FTSK_SYM_FUTEX_REQUEUE, ftsk_sym_, FTSK_FutexStatus, futex_requeu
 extern "C" {
 #endif
 
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_TASK_ID, ftsk_sym_, bool, task_id, FTSK_TaskId *id)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_WORKER_ID, ftsk_sym_, bool, worker_id, FTSK_Worker *id)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_YIELD, ftsk_sym_, void, yield, void)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_ABORT, ftsk_sym_, void, abort, void)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_CANCEL_REQUESTED, ftsk_sym_, bool, cancel_requested, void)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_SLEEP, ftsk_sym_, void, sleep, FSTD_Duration duration)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_TASK_ARENA, ftsk_sym_, FSTD_Arena *FSTD_MAYBE_NULL, task_arena, void)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_TASK_LOCAL_SET, ftsk_sym_, void, task_local_set, const FTSK_TssKey *key,
-                    void *FSTD_MAYBE_NULL value, FTSK_TssKeyDtor FSTD_MAYBE_NULL dtor)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_TASK_LOCAL_GET, ftsk_sym_, void *FSTD_MAYBE_NULL, task_local_get, const FTSK_TssKey *key)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_TASK_LOCAL_CLEAR, ftsk_sym_, void, task_local_clear, const FTSK_TssKey *key)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_CMD_BUF_JOIN, ftsk_sym_, FTSK_CmdBufHandleCompletionStatus, cmd_buf_join,
-                    FTSK_CmdBufHandle *cmd_buf)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_CMD_BUF_DETACH, ftsk_sym_, void, cmd_buf_detach, FTSK_CmdBufHandle *cmd_buf)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_CMD_BUF_CANCEL, ftsk_sym_, void, cmd_buf_cancel, FTSK_CmdBufHandle *cmd_buf)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_CMD_BUF_CANCEL_DETACH, ftsk_sym_, void, cmd_buf_cancel_detach, FTSK_CmdBufHandle *cmd_buf)
-FSTD_SYMBOL_IMPL(FTSK_SYM_EXECUTOR_GLOBAL, ftsk_sym_, FTSK_Executor, executor_global)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_EXECUTOR_INIT, ftsk_sym_, FSTD_Status, executor_init, FTSK_Executor **exe,
-                    const FTSK_ExecutorCfg *cfg)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_EXECUTOR_CURRENT, ftsk_sym_, FTSK_Executor *FSTD_MAYBE_NULL, executor_current)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_EXECUTOR_JOIN, ftsk_sym_, void, executor_join, FTSK_Executor *exe)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_EXECUTOR_JOIN_REQUESTED, ftsk_sym_, bool, executor_join_requested, FTSK_Executor *exe)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_EXECUTOR_ENQUEUE, ftsk_sym_, FTSK_CmdBufHandle *, executor_enqueue, FTSK_Executor *exe,
-                    FTSK_CmdBuf *cmd_buf)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_EXECUTOR_ENQUEUE_DETACHED, ftsk_sym_, void, executor_enqueue_detached, FTSK_Executor *exe,
-                    FTSK_CmdBuf *cmd_buf)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_FUTEX_WAIT, ftsk_sym_, FTSK_FutexStatus, futex_wait, const void *key, FSTD_USize key_size,
-                    FSTD_U64 expect, FSTD_USize token, const FSTD_Instant *FSTD_MAYBE_NULL timeout)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_FUTEX_WAIT_V, ftsk_sym_, FTSK_FutexStatus, futex_waitv, FTSK_FutexKeyExpectSlice keys,
-                    const FSTD_Instant *FSTD_MAYBE_NULL timeout, FSTD_USize *wake_index)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_FUTEX_WAKE, ftsk_sym_, FSTD_USize, futex_wake, const void *key, FSTD_USize max_waiters,
-                    FTSK_FutexFilter filter)
-FSTD_SYMBOL_FN_IMPL(FTSK_SYM_FUTEX_REQUEUE, ftsk_sym_, FTSK_FutexStatus, futex_requeue, const void *key_from,
-                    const void *key_to, FSTD_USize key_size, FSTD_U64 expect, FSTD_USize max_wakes,
-                    FSTD_USize max_requeues, FTSK_FutexFilter filter, FTSK_FutexRequeueResult *result)
+FSTD_SYM_FN_IMP(FTSK_Sym_TaskId, bool, FTSK_TaskId *id)
+FSTD_SYM_FN_IMP(FTSK_Sym_WorkerId, bool, FTSK_Worker *id)
+FSTD_SYM_FN_IMP(FTSK_Sym_Yield, void, void)
+FSTD_SYM_FN_IMP(FTSK_Sym_Abort, void, void)
+FSTD_SYM_FN_IMP(FTSK_Sym_CancelRequested, bool, void)
+FSTD_SYM_FN_IMP(FTSK_Sym_Sleep, void, FSTD_Duration duration)
+FSTD_SYM_FN_IMP(FTSK_Sym_TaskArena, FSTD_Arena *FSTD_MAYBE_NULL, void)
+FSTD_SYM_FN_IMP(FTSK_Sym_TaskLocalSet, void, const FTSK_TssKey *key, void *FSTD_MAYBE_NULL value,
+                FTSK_TssKeyDtor FSTD_MAYBE_NULL dtor)
+FSTD_SYM_FN_IMP(FTSK_Sym_TaskLocalGet, void *FSTD_MAYBE_NULL, const FTSK_TssKey *key)
+FSTD_SYM_FN_IMP(FTSK_Sym_TaskLocalClear, void, const FTSK_TssKey *key)
+FSTD_SYM_FN_IMP(FTSK_Sym_CmdBufJoin, FTSK_CmdBufHandleCompletionStatus, FTSK_CmdBufHandle *cmd_buf)
+FSTD_SYM_FN_IMP(FTSK_Sym_CmdBufDetach, void, FTSK_CmdBufHandle *cmd_buf)
+FSTD_SYM_FN_IMP(FTSK_Sym_CmdBufCancel, void, FTSK_CmdBufHandle *cmd_buf)
+FSTD_SYM_FN_IMP(FTSK_Sym_CmdBufCancelDetach, void, FTSK_CmdBufHandle *cmd_buf)
+FSTD_SYM_IMP(FTSK_Sym_ExecutorGlobal, FTSK_Executor)
+FSTD_SYM_FN_IMP(FTSK_Sym_ExecutorInit, FSTD_Status, FTSK_Executor **exe, const FTSK_ExecutorCfg *cfg)
+FSTD_SYM_FN_IMP(FTSK_Sym_ExecutorCurrent, FTSK_Executor *FSTD_MAYBE_NULL, void)
+FSTD_SYM_FN_IMP(FTSK_Sym_ExecutorJoin, void, FTSK_Executor *exe)
+FSTD_SYM_FN_IMP(FTSK_Sym_ExecutorJoinRequested, bool, FTSK_Executor *exe)
+FSTD_SYM_FN_IMP(FTSK_Sym_ExecutorEnqueue, FTSK_CmdBufHandle *, FTSK_Executor *exe, FTSK_CmdBuf *cmd_buf)
+FSTD_SYM_FN_IMP(FTSK_Sym_ExecutorEnqueueDetached, void, FTSK_Executor *exe, FTSK_CmdBuf *cmd_buf)
+FSTD_SYM_FN_IMP(FTSK_Sym_FutexWait, FTSK_FutexStatus, const void *key, FSTD_USize key_size, FSTD_U64 expect,
+                FSTD_USize token, const FSTD_Instant *FSTD_MAYBE_NULL timeout)
+FSTD_SYM_FN_IMP(FTSK_Sym_FutexWaitv, FTSK_FutexStatus, FTSK_FutexKeyExpectSlice keys,
+                const FSTD_Instant *FSTD_MAYBE_NULL timeout, FSTD_USize *wake_index)
+FSTD_SYM_FN_IMP(FTSK_Sym_FutexWake, FSTD_USize, const void *key, FSTD_USize max_waiters, FTSK_FutexFilter filter)
+FSTD_SYM_FN_IMP(FTSK_Sym_FutexRequeue, FTSK_FutexStatus, const void *key_from, const void *key_to, FSTD_USize key_size,
+                FSTD_U64 expect, FSTD_USize max_wakes, FSTD_USize max_requeues, FTSK_FutexFilter filter,
+                FTSK_FutexRequeueResult *result)
 
-fstd_func_impl bool ftsk_task_id_current(FTSK_TaskId *id) { return ftsk_sym_task_id_get()(id); }
+fstd_func_impl bool ftsk_task_id_current(FTSK_TaskId *id) { return FTSK_Sym_TaskId__get()(id); }
 
-fstd_func_impl bool ftsk_worker_id_current(FTSK_Worker *id) { return ftsk_sym_worker_id_get()(id); }
+fstd_func_impl bool ftsk_worker_id_current(FTSK_Worker *id) { return FTSK_Sym_WorkerId__get()(id); }
 
-fstd_func_impl void ftsk_yield(void) { ftsk_sym_yield_get()(); }
+fstd_func_impl void ftsk_yield(void) { FTSK_Sym_Yield__get()(); }
 
-fstd_func_impl void ftsk_abort(void) { ftsk_sym_abort_get()(); }
+fstd_func_impl void ftsk_abort(void) { FTSK_Sym_Abort__get()(); }
 
-fstd_func_impl bool ftsk_cancel_requested(void) { return ftsk_sym_cancel_requested_get()(); }
+fstd_func_impl bool ftsk_cancel_requested(void) { return FTSK_Sym_CancelRequested__get()(); }
 
-fstd_func_impl void ftsk_sleep(FSTD_Duration duration) { ftsk_sym_sleep_get()(duration); }
+fstd_func_impl void ftsk_sleep(FSTD_Duration duration) { FTSK_Sym_Sleep__get()(duration); }
 
-fstd_func_impl FSTD_Arena *FSTD_MAYBE_NULL ftsk_task_arena(void) { return ftsk_sym_task_arena_get()(); }
+fstd_func_impl FSTD_Arena *FSTD_MAYBE_NULL ftsk_task_arena(void) { return FTSK_Sym_TaskArena__get()(); }
 
 fstd_func_impl void ftsk_tss_key_set(const FTSK_TssKey *key, void *FSTD_MAYBE_NULL value,
                                      FTSK_TssKeyDtor FSTD_MAYBE_NULL dtor) {
-    ftsk_sym_task_local_set_get()(key, value, dtor);
+    FTSK_Sym_TaskLocalSet__get()(key, value, dtor);
 }
 
 fstd_func_impl void *FSTD_MAYBE_NULL ftsk_tss_key_get(const FTSK_TssKey *key) {
-    return ftsk_sym_task_local_get_get()(key);
+    return FTSK_Sym_TaskLocalGet__get()(key);
 }
 
-fstd_func_impl void ftsk_tss_key_clear(const FTSK_TssKey *key) { ftsk_sym_task_local_clear_get()(key); }
+fstd_func_impl void ftsk_tss_key_clear(const FTSK_TssKey *key) { FTSK_Sym_TaskLocalClear__get()(key); }
 
 fstd_func_impl FTSK_CmdBufHandleCompletionStatus ftsk_cmd_buf_handle_join(FTSK_CmdBufHandle *cmd_buf) {
-    return ftsk_sym_cmd_buf_join_get()(cmd_buf);
+    return FTSK_Sym_CmdBufJoin__get()(cmd_buf);
 }
 
-fstd_func_impl void ftsk_cmd_buf_handle_detach(FTSK_CmdBufHandle *cmd_buf) { ftsk_sym_cmd_buf_detach_get()(cmd_buf); }
+fstd_func_impl void ftsk_cmd_buf_handle_detach(FTSK_CmdBufHandle *cmd_buf) { FTSK_Sym_CmdBufDetach__get()(cmd_buf); }
 
-fstd_func_impl void ftsk_cmd_buf_handle_cancel(FTSK_CmdBufHandle *cmd_buf) { ftsk_sym_cmd_buf_cancel_get()(cmd_buf); }
+fstd_func_impl void ftsk_cmd_buf_handle_cancel(FTSK_CmdBufHandle *cmd_buf) { FTSK_Sym_CmdBufCancel__get()(cmd_buf); }
 
 fstd_func_impl void ftsk_cmd_buf_handle_cancel_detach(FTSK_CmdBufHandle *cmd_buf) {
-    ftsk_sym_cmd_buf_cancel_detach_get()(cmd_buf);
+    FTSK_Sym_CmdBufCancelDetach__get()(cmd_buf);
 }
 
-fstd_func FTSK_Executor *ftsk_global_executor() { return (FTSK_Executor *)ftsk_sym_executor_global_get(); }
+fstd_func FTSK_Executor *ftsk_global_executor() { return (FTSK_Executor *)FTSK_Sym_ExecutorGlobal__get(); }
 
 fstd_func FSTD_Status ftsk_executor_init(FTSK_Executor **exe, const FTSK_ExecutorCfg *cfg) {
-    return ftsk_sym_executor_init_get()(exe, cfg);
+    return FTSK_Sym_ExecutorInit__get()(exe, cfg);
 }
 
-fstd_func FTSK_Executor *ftsk_executor_current() { return ftsk_sym_executor_current_get()(); }
+fstd_func FTSK_Executor *ftsk_executor_current() { return FTSK_Sym_ExecutorCurrent__get()(); }
 
-fstd_func void ftsk_executor_join(FTSK_Executor *exe) { ftsk_sym_executor_join_get()(exe); }
+fstd_func void ftsk_executor_join(FTSK_Executor *exe) { FTSK_Sym_ExecutorJoin__get()(exe); }
 
-fstd_func bool ftsk_executor_join_requested(FTSK_Executor *exe) { return ftsk_sym_executor_join_requested_get()(exe); }
+fstd_func bool ftsk_executor_join_requested(FTSK_Executor *exe) { return FTSK_Sym_ExecutorJoinRequested__get()(exe); }
 
 fstd_func FTSK_CmdBufHandle *ftsk_executor_enqueue(FTSK_Executor *exe, FTSK_CmdBuf *cmd_buf) {
-    return ftsk_sym_executor_enqueue_get()(exe, cmd_buf);
+    return FTSK_Sym_ExecutorEnqueue__get()(exe, cmd_buf);
 }
 
 fstd_func void ftsk_executor_enqueue_detached(FTSK_Executor *exe, FTSK_CmdBuf *cmd_buf) {
-    ftsk_sym_executor_enqueue_detached_get()(exe, cmd_buf);
+    FTSK_Sym_ExecutorEnqueueDetached__get()(exe, cmd_buf);
 }
 
 fstd_func FTSK_FutexStatus ftsk_futex_wait(const void *key, FSTD_USize key_size, FSTD_U64 expect, FSTD_USize token,
                                            const FSTD_Instant *FSTD_MAYBE_NULL timeout) {
-    return ftsk_sym_futex_wait_get()(key, key_size, expect, token, timeout);
+    return FTSK_Sym_FutexWait__get()(key, key_size, expect, token, timeout);
 }
 
 fstd_func FTSK_FutexStatus ftsk_futex_waitv(FTSK_FutexKeyExpectSlice keys, const FSTD_Instant *FSTD_MAYBE_NULL timeout,
                                             FSTD_USize *wake_index) {
-    return ftsk_sym_futex_waitv_get()(keys, timeout, wake_index);
+    return FTSK_Sym_FutexWaitv__get()(keys, timeout, wake_index);
 }
 
 fstd_func FSTD_USize ftsk_futex_wake(const void *key, FSTD_USize max_waiters, FTSK_FutexFilter filter) {
-    return ftsk_sym_futex_wake_get()(key, max_waiters, filter);
+    return FTSK_Sym_FutexWake__get()(key, max_waiters, filter);
 }
 
 fstd_func FTSK_FutexStatus ftsk_futex_requeue(const void *key_from, const void *key_to, FSTD_USize key_size,
                                               FSTD_U64 expect, FSTD_USize max_wakes, FSTD_USize max_requeues,
                                               FTSK_FutexFilter filter, FTSK_FutexRequeueResult *result) {
-    return ftsk_sym_futex_requeue_get()(key_from, key_to, key_size, expect, max_wakes, max_requeues, filter, result);
+    return FTSK_Sym_FutexRequeue__get()(key_from, key_to, key_size, expect, max_wakes, max_requeues, filter, result);
 }
 
 #ifdef __cplusplus

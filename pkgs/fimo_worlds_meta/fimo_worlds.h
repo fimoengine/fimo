@@ -206,51 +206,34 @@ fstd_func void fwrld_scheduler_schedule(FWRLD_Scheduler sched, FSTD_Arena *arena
 fstd_func void fwrld_scheduler_flush(FWRLD_Scheduler sched);
 
 #define FWRLD_SYM_NS "fimo-worlds"
-#define FWRLD__SYM_VERSION FSTD_CTX_VERSION
+#define FWRLD__SYM_ID(name) FSTD_MODULE_SYMBOL_NS(name, FWRLD_SYM_NS, FSTD_CTX_VERSION)
 #define FWRLD_SYM_ALL                                                                                                  \
-    fwrld_sym_world_init_symbol, fwrld_sym_world_deinit_symbol, fwrld_sym_world_add_res_symbol,                        \
-            fwrld_sym_resource_deinit_symbol, fwrld_sym_resource_lock_read_symbol,                                     \
-            fwrld_sym_resource_unlock_read_symbol, fwrld_sym_resource_lock_write_symbol,                               \
-            fwrld_sym_resource_unlock_write_symbol, fwrld_sym_world_add_scheduler_symbol,                              \
-            fwrld_sym_scheduler_deinit_symbol, fwrld_sym_scheduler_add_sys_symbol, fwrld_sym_sys_deinit_symbol,        \
-            fwrld_sym_scheduler_run_symbol, fwrld_sym_scheduler_schedule_symbol, fwrld_sym_scheduler_flush_symbol
+    FWRLD_Sym_WorldInit, FWRLD_Sym_WorldDeinit, FWRLD_Sym_WorldAddRes, FWRLD_Sym_WorldAddScheduler,                    \
+            FWRLD_Sym_ResourceDeinit, FWRLD_Sym_ResourceLockRead, FWRLD_Sym_ResourceUnlockRead,                        \
+            FWRLD_Sym_ResourceLockWrite, FWRLD_Sym_ResourceUnlockWrite, FWRLD_Sym_SchedulerDeinit,                     \
+            FWRLD_Sym_SchedulerAddSys, FWRLD_Sym_SchedulerRun, FWRLD_Sym_SchedulerSchedule, FWRLD_Sym_SchedulerFlush,  \
+            FWRLD_Sym_SysDeinit
 
-#define FWRLD_SYM_WORLD_INIT FSTD_MODULE_SYMBOL_NS("world_init", FWRLD_SYM_NS, FWRLD__SYM_VERSION)
-#define FWRLD_SYM_WORLD_DEINIT FSTD_MODULE_SYMBOL_NS("world_deinit", FWRLD_SYM_NS, FWRLD__SYM_VERSION)
-#define FWRLD_SYM_WORLD_ADD_RES FSTD_MODULE_SYMBOL_NS("world_add_res", FWRLD_SYM_NS, FWRLD__SYM_VERSION)
-#define FWRLD_SYM_RESOURCE_DEINIT FSTD_MODULE_SYMBOL_NS("resource_deinit", FWRLD_SYM_NS, FWRLD__SYM_VERSION)
-#define FWRLD_SYM_RESOURCE_LOCK_READ FSTD_MODULE_SYMBOL_NS("resource_lock_read", FWRLD_SYM_NS, FWRLD__SYM_VERSION)
-#define FWRLD_SYM_RESOURCE_UNLOCK_READ FSTD_MODULE_SYMBOL_NS("resource_unlock_read", FWRLD_SYM_NS, FWRLD__SYM_VERSION)
-#define FWRLD_SYM_RESOURCE_LOCK_WRITE FSTD_MODULE_SYMBOL_NS("resource_lock_write", FWRLD_SYM_NS, FWRLD__SYM_VERSION)
-#define FWRLD_SYM_RESOURCE_UNLOCK_WRITE FSTD_MODULE_SYMBOL_NS("resource_unlock_write", FWRLD_SYM_NS, FWRLD__SYM_VERSION)
-#define FWRLD_SYM_WORLD_ADD_SCHEDULER FSTD_MODULE_SYMBOL_NS("world_add_scheduler", FWRLD_SYM_NS, FWRLD__SYM_VERSION)
-#define FWRLD_SYM_SCHEDULER_DEINIT FSTD_MODULE_SYMBOL_NS("scheduler_deinit", FWRLD_SYM_NS, FWRLD__SYM_VERSION)
-#define FWRLD_SYM_SCHEDULER_ADD_SYS FSTD_MODULE_SYMBOL_NS("scheduler_add_sys", FWRLD_SYM_NS, FWRLD__SYM_VERSION)
-#define FWRLD_SYM_SYS_DEINIT FSTD_MODULE_SYMBOL_NS("sys_deinit", FWRLD_SYM_NS, FWRLD__SYM_VERSION)
-#define FWRLD_SYM_SCHEDULER_RUN FSTD_MODULE_SYMBOL_NS("scheduler_run", FWRLD_SYM_NS, FWRLD__SYM_VERSION)
-#define FWRLD_SYM_SCHEDULER_SCHEDULE FSTD_MODULE_SYMBOL_NS("scheduler_schedule", FWRLD_SYM_NS, FWRLD__SYM_VERSION)
-#define FWRLD_SYM_SCHEDULER_FLUSH FSTD_MODULE_SYMBOL_NS("scheduler_flush", FWRLD_SYM_NS, FWRLD__SYM_VERSION)
-
-FSTD_SYMBOL_FN(FWRLD_SYM_WORLD_INIT, fwrld_sym_, FSTD_Status, world_init, FWRLD_World *world,
-               const FWRLD_WorldDesc *desc)
-FSTD_SYMBOL_FN(FWRLD_SYM_WORLD_DEINIT, fwrld_sym_, void, world_deinit, FWRLD_World world)
-FSTD_SYMBOL_FN(FWRLD_SYM_WORLD_ADD_RES, fwrld_sym_, FWRLD_Res, world_add_res, FWRLD_World world,
-               const FWRLD_ResDesc *desc)
-FSTD_SYMBOL_FN(FWRLD_SYM_RESOURCE_DEINIT, fwrld_sym_, void, resource_deinit, FWRLD_Res res)
-FSTD_SYMBOL_FN(FWRLD_SYM_RESOURCE_LOCK_READ, fwrld_sym_, void *, resource_lock_read, FWRLD_Res res)
-FSTD_SYMBOL_FN(FWRLD_SYM_RESOURCE_UNLOCK_READ, fwrld_sym_, void, resource_unlock_read, FWRLD_Res res)
-FSTD_SYMBOL_FN(FWRLD_SYM_RESOURCE_LOCK_WRITE, fwrld_sym_, void *, resource_lock_write, FWRLD_Res res)
-FSTD_SYMBOL_FN(FWRLD_SYM_RESOURCE_UNLOCK_WRITE, fwrld_sym_, void, resource_unlock_write, FWRLD_Res res)
-FSTD_SYMBOL_FN(FWRLD_SYM_WORLD_ADD_SCHEDULER, fwrld_sym_, FWRLD_Scheduler, world_add_scheduler, FWRLD_World world,
-               const FWRLD_SchedulerDesc *desc)
-FSTD_SYMBOL_FN(FWRLD_SYM_SCHEDULER_DEINIT, fwrld_sym_, void, scheduler_deinit, FWRLD_Scheduler sched)
-FSTD_SYMBOL_FN(FWRLD_SYM_SCHEDULER_ADD_SYS, fwrld_sym_, FSTD_Status, scheduler_add_sys, FWRLD_Scheduler sched,
-               const FWRLD_SysDesc *desc, FWRLD_Sys *sys)
-FSTD_SYMBOL_FN(FWRLD_SYM_SYS_DEINIT, fwrld_sym_, void, sys_deinit, FWRLD_Sys sys, FTSK_Fence *FSTD_MAYBE_NULL fence)
-FSTD_SYMBOL_FN(FWRLD_SYM_SCHEDULER_RUN, fwrld_sym_, void, scheduler_run, FWRLD_Scheduler sched, FSTD_Arena *arena)
-FSTD_SYMBOL_FN(FWRLD_SYM_SCHEDULER_SCHEDULE, fwrld_sym_, void, scheduler_schedule, FWRLD_Scheduler sched,
-               FSTD_Arena *arena, FTSK_Fence *FSTD_MAYBE_NULL start, FTSK_Fence *FSTD_MAYBE_NULL completion)
-FSTD_SYMBOL_FN(FWRLD_SYM_SCHEDULER_FLUSH, fwrld_sym_, void, scheduler_flush, FWRLD_Scheduler sched)
+FSTD_SYM_FN(FWRLD_Sym_WorldInit, FWRLD__SYM_ID("world_init"), FSTD_Status, FWRLD_World *world,
+            const FWRLD_WorldDesc *desc)
+FSTD_SYM_FN(FWRLD_Sym_WorldDeinit, FWRLD__SYM_ID("world_deinit"), void, FWRLD_World world)
+FSTD_SYM_FN(FWRLD_Sym_WorldAddRes, FWRLD__SYM_ID("world_add_res"), FWRLD_Res, FWRLD_World world,
+            const FWRLD_ResDesc *desc)
+FSTD_SYM_FN(FWRLD_Sym_WorldAddScheduler, FWRLD__SYM_ID("world_add_scheduler"), FWRLD_Scheduler, FWRLD_World world,
+            const FWRLD_SchedulerDesc *desc)
+FSTD_SYM_FN(FWRLD_Sym_ResourceDeinit, FWRLD__SYM_ID("resource_deinit"), void, FWRLD_Res res)
+FSTD_SYM_FN(FWRLD_Sym_ResourceLockRead, FWRLD__SYM_ID("resource_lock_read"), void *, FWRLD_Res res)
+FSTD_SYM_FN(FWRLD_Sym_ResourceUnlockRead, FWRLD__SYM_ID("resource_unlock_read"), void, FWRLD_Res res)
+FSTD_SYM_FN(FWRLD_Sym_ResourceLockWrite, FWRLD__SYM_ID("resource_lock_write"), void *, FWRLD_Res res)
+FSTD_SYM_FN(FWRLD_Sym_ResourceUnlockWrite, FWRLD__SYM_ID("resource_unlock_write"), void, FWRLD_Res res)
+FSTD_SYM_FN(FWRLD_Sym_SchedulerDeinit, FWRLD__SYM_ID("scheduler_deinit"), void, FWRLD_Scheduler sched)
+FSTD_SYM_FN(FWRLD_Sym_SchedulerAddSys, FWRLD__SYM_ID("scheduler_add_sys"), FSTD_Status, FWRLD_Scheduler sched,
+            const FWRLD_SysDesc *desc, FWRLD_Sys *sys)
+FSTD_SYM_FN(FWRLD_Sym_SchedulerRun, FWRLD__SYM_ID("scheduler_run"), void, FWRLD_Scheduler sched, FSTD_Arena *arena)
+FSTD_SYM_FN(FWRLD_Sym_SchedulerSchedule, FWRLD__SYM_ID("scheduler_schedule"), void, FWRLD_Scheduler sched,
+            FSTD_Arena *arena, FTSK_Fence *FSTD_MAYBE_NULL start, FTSK_Fence *FSTD_MAYBE_NULL completion)
+FSTD_SYM_FN(FWRLD_Sym_SchedulerFlush, FWRLD__SYM_ID("scheduler_flush"), void, FWRLD_Scheduler sched)
+FSTD_SYM_FN(FWRLD_Sym_SysDeinit, FWRLD__SYM_ID("sys_deinit"), void, FWRLD_Sys sys, FTSK_Fence *FSTD_MAYBE_NULL fence)
 
 #ifdef __cplusplus
 }
@@ -331,74 +314,71 @@ namespace fimo_worlds {
 extern "C" {
 #endif
 
-FSTD_SYMBOL_FN_IMPL(FWRLD_SYM_WORLD_INIT, fwrld_sym_, FSTD_Status, world_init, FWRLD_World *world,
-                    const FWRLD_WorldDesc *desc)
-FSTD_SYMBOL_FN_IMPL(FWRLD_SYM_WORLD_DEINIT, fwrld_sym_, void, world_deinit, FWRLD_World world)
-FSTD_SYMBOL_FN_IMPL(FWRLD_SYM_WORLD_ADD_RES, fwrld_sym_, FWRLD_Res, world_add_res, FWRLD_World world,
-                    const FWRLD_ResDesc *desc)
-FSTD_SYMBOL_FN_IMPL(FWRLD_SYM_RESOURCE_DEINIT, fwrld_sym_, void, resource_deinit, FWRLD_Res res)
-FSTD_SYMBOL_FN_IMPL(FWRLD_SYM_RESOURCE_LOCK_READ, fwrld_sym_, void *, resource_lock_read, FWRLD_Res res)
-FSTD_SYMBOL_FN_IMPL(FWRLD_SYM_RESOURCE_UNLOCK_READ, fwrld_sym_, void, resource_unlock_read, FWRLD_Res res)
-FSTD_SYMBOL_FN_IMPL(FWRLD_SYM_RESOURCE_LOCK_WRITE, fwrld_sym_, void *, resource_lock_write, FWRLD_Res res)
-FSTD_SYMBOL_FN_IMPL(FWRLD_SYM_RESOURCE_UNLOCK_WRITE, fwrld_sym_, void, resource_unlock_write, FWRLD_Res res)
-FSTD_SYMBOL_FN_IMPL(FWRLD_SYM_WORLD_ADD_SCHEDULER, fwrld_sym_, FWRLD_Scheduler, world_add_scheduler, FWRLD_World world,
-                    const FWRLD_SchedulerDesc *desc)
-FSTD_SYMBOL_FN_IMPL(FWRLD_SYM_SCHEDULER_DEINIT, fwrld_sym_, void, scheduler_deinit, FWRLD_Scheduler sched)
-FSTD_SYMBOL_FN_IMPL(FWRLD_SYM_SCHEDULER_ADD_SYS, fwrld_sym_, FSTD_Status, scheduler_add_sys, FWRLD_Scheduler sched,
-                    const FWRLD_SysDesc *desc, FWRLD_Sys *sys)
-FSTD_SYMBOL_FN_IMPL(FWRLD_SYM_SYS_DEINIT, fwrld_sym_, void, sys_deinit, FWRLD_Sys sys, FTSK_Fence *fence)
-FSTD_SYMBOL_FN_IMPL(FWRLD_SYM_SCHEDULER_RUN, fwrld_sym_, void, scheduler_run, FWRLD_Scheduler sched, FSTD_Arena *arena)
-FSTD_SYMBOL_FN_IMPL(FWRLD_SYM_SCHEDULER_SCHEDULE, fwrld_sym_, void, scheduler_schedule, FWRLD_Scheduler sched,
-                    FSTD_Arena *arena, FTSK_Fence *FSTD_MAYBE_NULL start, FTSK_Fence *FSTD_MAYBE_NULL completion)
-FSTD_SYMBOL_FN_IMPL(FWRLD_SYM_SCHEDULER_FLUSH, fwrld_sym_, void, scheduler_flush, FWRLD_Scheduler sched)
+FSTD_SYM_FN_IMP(FWRLD_Sym_WorldInit, FSTD_Status, FWRLD_World *world, const FWRLD_WorldDesc *desc)
+FSTD_SYM_FN_IMP(FWRLD_Sym_WorldDeinit, void, FWRLD_World world)
+FSTD_SYM_FN_IMP(FWRLD_Sym_WorldAddRes, FWRLD_Res, FWRLD_World world, const FWRLD_ResDesc *desc)
+FSTD_SYM_FN_IMP(FWRLD_Sym_WorldAddScheduler, FWRLD_Scheduler, FWRLD_World world, const FWRLD_SchedulerDesc *desc)
+FSTD_SYM_FN_IMP(FWRLD_Sym_ResourceDeinit, void, FWRLD_Res res)
+FSTD_SYM_FN_IMP(FWRLD_Sym_ResourceLockRead, void *, FWRLD_Res res)
+FSTD_SYM_FN_IMP(FWRLD_Sym_ResourceUnlockRead, void, FWRLD_Res res)
+FSTD_SYM_FN_IMP(FWRLD_Sym_ResourceLockWrite, void *, FWRLD_Res res)
+FSTD_SYM_FN_IMP(FWRLD_Sym_ResourceUnlockWrite, void, FWRLD_Res res)
+FSTD_SYM_FN_IMP(FWRLD_Sym_SchedulerDeinit, void, FWRLD_Scheduler sched)
+FSTD_SYM_FN_IMP(FWRLD_Sym_SchedulerAddSys, FSTD_Status, FWRLD_Scheduler sched, const FWRLD_SysDesc *desc,
+                FWRLD_Sys *sys)
+FSTD_SYM_FN_IMP(FWRLD_Sym_SchedulerRun, void, FWRLD_Scheduler sched, FSTD_Arena *arena)
+FSTD_SYM_FN_IMP(FWRLD_Sym_SchedulerSchedule, void, FWRLD_Scheduler sched, FSTD_Arena *arena,
+                FTSK_Fence *FSTD_MAYBE_NULL start, FTSK_Fence *FSTD_MAYBE_NULL completion)
+FSTD_SYM_FN_IMP(FWRLD_Sym_SchedulerFlush, void, FWRLD_Scheduler sched)
+FSTD_SYM_FN_IMP(FWRLD_Sym_SysDeinit, void, FWRLD_Sys sys, FTSK_Fence *FSTD_MAYBE_NULL fence)
 
 FSTD_CHECK_USE fstd_func FSTD_Status fwrld_world_init(FWRLD_World *world, const FWRLD_WorldDesc *desc) {
-    return fwrld_sym_world_init_get()(world, desc);
+    return FWRLD_Sym_WorldInit__get()(world, desc);
 }
 
-fstd_func_impl void fwrld_world_deinit(FWRLD_World world) { return fwrld_sym_world_deinit_get()(world); }
+fstd_func_impl void fwrld_world_deinit(FWRLD_World world) { return FWRLD_Sym_WorldDeinit__get()(world); }
 
 FSTD_CHECK_USE fstd_func_impl FWRLD_Res fwrld_world_add_res(FWRLD_World world, const FWRLD_ResDesc *desc) {
-    return fwrld_sym_world_add_res_get()(world, desc);
+    return FWRLD_Sym_WorldAddRes__get()(world, desc);
 }
 
-fstd_func_impl void fwrld_resource_deinit(FWRLD_Res res) { return fwrld_sym_resource_deinit_get()(res); }
+fstd_func_impl void fwrld_resource_deinit(FWRLD_Res res) { return FWRLD_Sym_ResourceDeinit__get()(res); }
 
-fstd_func_impl void *fwrld_resource_lock_read(FWRLD_Res res) { return fwrld_sym_resource_lock_read_get()(res); }
+fstd_func_impl void *fwrld_resource_lock_read(FWRLD_Res res) { return FWRLD_Sym_ResourceLockRead__get()(res); }
 
-fstd_func_impl void fwrld_resource_unlock_read(FWRLD_Res res) { return fwrld_sym_resource_unlock_read_get()(res); }
+fstd_func_impl void fwrld_resource_unlock_read(FWRLD_Res res) { return FWRLD_Sym_ResourceUnlockRead__get()(res); }
 
-fstd_func_impl void *fwrld_resource_lock_write(FWRLD_Res res) { return fwrld_sym_resource_lock_write_get()(res); }
+fstd_func_impl void *fwrld_resource_lock_write(FWRLD_Res res) { return FWRLD_Sym_ResourceLockWrite__get()(res); }
 
-fstd_func_impl void fwrld_resource_unlock_write(FWRLD_Res res) { return fwrld_sym_resource_unlock_write_get()(res); }
+fstd_func_impl void fwrld_resource_unlock_write(FWRLD_Res res) { return FWRLD_Sym_ResourceUnlockWrite__get()(res); }
 
 FSTD_CHECK_USE fstd_func_impl FWRLD_Scheduler fwrld_world_add_scheduler(FWRLD_World world,
                                                                         const FWRLD_SchedulerDesc *desc) {
-    return fwrld_sym_world_add_scheduler_get()(world, desc);
+    return FWRLD_Sym_WorldAddScheduler__get()(world, desc);
 }
 
-fstd_func_impl void fwrld_scheduler_deinit(FWRLD_Scheduler sched) { return fwrld_sym_scheduler_deinit_get()(sched); }
+fstd_func_impl void fwrld_scheduler_deinit(FWRLD_Scheduler sched) { return FWRLD_Sym_SchedulerDeinit__get()(sched); }
 
 FSTD_CHECK_USE fstd_func_impl FSTD_Status fwrld_scheduler_add_sys(FWRLD_Scheduler sched, const FWRLD_SysDesc *desc,
                                                                   FWRLD_Sys *sys) {
-    return fwrld_sym_scheduler_add_sys_get()(sched, desc, sys);
+    return FWRLD_Sym_SchedulerAddSys__get()(sched, desc, sys);
 }
 
 fstd_func_impl void fwrld_sys_deinit(FWRLD_Sys sys, FTSK_Fence *FSTD_MAYBE_NULL fence) {
-    return fwrld_sym_sys_deinit_get()(sys, fence);
+    return FWRLD_Sym_SysDeinit__get()(sys, fence);
 }
 
 fstd_func_impl void fwrld_scheduler_run(FWRLD_Scheduler sched, FSTD_Arena *arena) {
-    return fwrld_sym_scheduler_run_get()(sched, arena);
+    return FWRLD_Sym_SchedulerRun__get()(sched, arena);
 }
 
 fstd_func_impl void fwrld_scheduler_schedule(FWRLD_Scheduler sched, FSTD_Arena *arena,
                                              FTSK_Fence *FSTD_MAYBE_NULL start,
                                              FTSK_Fence *FSTD_MAYBE_NULL completion) {
-    return fwrld_sym_scheduler_schedule_get()(sched, arena, start, completion);
+    return FWRLD_Sym_SchedulerSchedule__get()(sched, arena, start, completion);
 }
 
-fstd_func_impl void fwrld_scheduler_flush(FWRLD_Scheduler sched) { return fwrld_sym_scheduler_flush_get()(sched); }
+fstd_func_impl void fwrld_scheduler_flush(FWRLD_Scheduler sched) { return FWRLD_Sym_SchedulerFlush__get()(sched); }
 
 #ifdef __cplusplus
 }

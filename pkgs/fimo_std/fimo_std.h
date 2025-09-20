@@ -3488,54 +3488,80 @@ fstd_util void fstd_module_export_default_on_event(const FSTD_ModuleExport *modu
 #define FSTD__MODULE_SECTION "fimo_module"
 #endif
 
-#define FSTD_MODULE_SYMBOL_EXT(id_, bind_, unbind_) {.id = id_, .bind = bind_, .unbind = unbind_}
-
-#define FSTD_SYMBOL(id_, prefix, type, name)                                                                           \
-    fstd_func const type *FSTD_CONCAT(FSTD_CONCAT(prefix, name), _get)(void);                                          \
-    fstd_func void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register)(const void *ptr);                                 \
-    fstd_func void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _unregister)(void);                                          \
-    fstd_glob FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);                                                        \
-    fstd_internal const FSTD_ModuleSymbolExt FSTD_CONCAT(FSTD_CONCAT(prefix, name), _symbol) = {                       \
+#ifdef __cplusplus
+#define FSTD_SYM(name, id_, type)                                                                                      \
+    fstd_func const type *FSTD_CONCAT(name, __get)(void);                                                              \
+    fstd_func void FSTD_CONCAT(name, __bind)(const void *ptr);                                                         \
+    fstd_func void FSTD_CONCAT(name, __unbind)(void);                                                                  \
+    fstd_glob FSTD__RefCountedHandle FSTD_CONCAT(name, __Handle);                                                      \
+    fstd_internal constexpr FSTD_ModuleSymbol FSTD_CONCAT(name, _Id) = id_;                                            \
+    fstd_internal constexpr FSTD_ModuleSymbolExt name = {                                                              \
             .id = id_,                                                                                                 \
-            .bind = FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register),                                                 \
-            .unbind = FSTD_CONCAT(FSTD_CONCAT(prefix, name), _unregister),                                             \
+            .bind = FSTD_CONCAT(name, __bind),                                                                         \
+            .unbind = FSTD_CONCAT(name, __unbind),                                                                     \
     };
 
-#define FSTD_SYMBOL_FN(id_, prefix, ret, name, ...)                                                                    \
-    fstd_func ret (*FSTD_CONCAT(FSTD_CONCAT(prefix, name), _get)(void))(__VA_ARGS__);                                  \
-    fstd_func void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register)(const void *ptr);                                 \
-    fstd_func void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _unregister)(void);                                          \
-    fstd_glob FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);                                                        \
-    fstd_internal const FSTD_ModuleSymbolExt FSTD_CONCAT(FSTD_CONCAT(prefix, name), _symbol) = {                       \
+#define FSTD_SYM_FN(name, id_, ret, ...)                                                                               \
+    fstd_func ret (*FSTD_CONCAT(name, __get)(void))(__VA_ARGS__);                                                      \
+    fstd_func void FSTD_CONCAT(name, __bind)(const void *ptr);                                                         \
+    fstd_func void FSTD_CONCAT(name, __unbind)(void);                                                                  \
+    fstd_glob FSTD__RefCountedHandle FSTD_CONCAT(name, __Handle);                                                      \
+    fstd_internal constexpr FSTD_ModuleSymbol FSTD_CONCAT(name, _Id) = id_;                                            \
+    fstd_internal constexpr FSTD_ModuleSymbolExt name = {                                                              \
             .id = id_,                                                                                                 \
-            .bind = FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register),                                                 \
-            .unbind = FSTD_CONCAT(FSTD_CONCAT(prefix, name), _unregister),                                             \
+            .bind = FSTD_CONCAT(name, __bind),                                                                         \
+            .unbind = FSTD_CONCAT(name, __unbind),                                                                     \
+    };
+#else
+#define FSTD_SYM(name, id_, type)                                                                                      \
+    fstd_func const type *FSTD_CONCAT(name, __get)(void);                                                              \
+    fstd_func void FSTD_CONCAT(name, __bind)(const void *ptr);                                                         \
+    fstd_func void FSTD_CONCAT(name, __unbind)(void);                                                                  \
+    fstd_glob FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);                                                        \
+    fstd_internal const FSTD_ModuleSymbol FSTD_CONCAT(name, _Id) = id_;                                                \
+    fstd_internal const FSTD_ModuleSymbolExt name = {                                                                  \
+            .id = id_,                                                                                                 \
+            .bind = FSTD_CONCAT(name, __bind),                                                                         \
+            .unbind = FSTD_CONCAT(name, __unbind),                                                                     \
     };
 
-#define FSTD_SYMBOL_IMPL(id_, prefix, type, name)                                                                      \
-    fstd_func_impl const type *FSTD_CONCAT(FSTD_CONCAT(prefix, name), _get)(void) {                                    \
-        return (const type *)FSTD_CONCAT(prefix, name).handle;                                                         \
+#define FSTD_SYM_FN(name, id_, ret, ...)                                                                               \
+    fstd_func ret (*FSTD_CONCAT(name, __get)(void))(__VA_ARGS__);                                                      \
+    fstd_func void FSTD_CONCAT(name, __bind)(const void *ptr);                                                         \
+    fstd_func void FSTD_CONCAT(name, __unbind)(void);                                                                  \
+    fstd_glob FSTD__RefCountedHandle FSTD_CONCAT(name, __Handle);                                                      \
+    fstd_internal const FSTD_ModuleSymbol FSTD_CONCAT(name, _Id) = id_;                                                \
+    fstd_internal const FSTD_ModuleSymbolExt name = {                                                                  \
+            .id = id_,                                                                                                 \
+            .bind = FSTD_CONCAT(name, __bind),                                                                         \
+            .unbind = FSTD_CONCAT(name, __unbind),                                                                     \
+    };
+#endif
+
+#define FSTD_SYM_IMP(name, type)                                                                                       \
+    fstd_func_impl const type *FSTD_CONCAT(name, __get)(void) {                                                        \
+        return (const type *)FSTD_CONCAT(name, __Handle).handle;                                                       \
     }                                                                                                                  \
-    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register)(const void *ptr) {                           \
-        fstd__ref_counted_handle_register(&FSTD_CONCAT(prefix, name), ptr);                                            \
+    fstd_func_impl void FSTD_CONCAT(name, __bind)(const void *ptr) {                                                   \
+        fstd__ref_counted_handle_register(&FSTD_CONCAT(name, __Handle), ptr);                                          \
     }                                                                                                                  \
-    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _unregister)(void) {                                    \
-        fstd__ref_counted_handle_unregister(&FSTD_CONCAT(prefix, name));                                               \
+    fstd_func_impl void FSTD_CONCAT(name, __unbind)(void) {                                                            \
+        fstd__ref_counted_handle_unregister(&FSTD_CONCAT(name, __Handle));                                             \
     }                                                                                                                  \
-    fstd_glob_impl FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);
+    fstd_glob_impl FSTD__RefCountedHandle FSTD_CONCAT(name, __Handle);
 
 
-#define FSTD_SYMBOL_FN_IMPL(id_, prefix, ret, name, ...)                                                               \
-    fstd_func_impl ret (*FSTD_CONCAT(FSTD_CONCAT(prefix, name), _get)())(__VA_ARGS__) {                                \
-        return (ret (*)(__VA_ARGS__))FSTD_CONCAT(prefix, name).handle;                                                 \
+#define FSTD_SYM_FN_IMP(name, ret, ...)                                                                                \
+    fstd_func_impl ret (*FSTD_CONCAT(name, __get)(void))(__VA_ARGS__) {                                                \
+        return (ret (*)(__VA_ARGS__))FSTD_CONCAT(name, __Handle).handle;                                               \
     }                                                                                                                  \
-    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _register)(const void *ptr) {                           \
-        fstd__ref_counted_handle_register(&FSTD_CONCAT(prefix, name), ptr);                                            \
+    fstd_func_impl void FSTD_CONCAT(name, __bind)(const void *ptr) {                                                   \
+        fstd__ref_counted_handle_register(&FSTD_CONCAT(name, __Handle), ptr);                                          \
     }                                                                                                                  \
-    fstd_func_impl void FSTD_CONCAT(FSTD_CONCAT(prefix, name), _unregister)(void) {                                    \
-        fstd__ref_counted_handle_unregister(&FSTD_CONCAT(prefix, name));                                               \
+    fstd_func_impl void FSTD_CONCAT(name, __unbind)(void) {                                                            \
+        fstd__ref_counted_handle_unregister(&FSTD_CONCAT(name, __Handle));                                             \
     }                                                                                                                  \
-    fstd_glob_impl FSTD__RefCountedHandle FSTD_CONCAT(prefix, name);
+    fstd_glob_impl FSTD__RefCountedHandle FSTD_CONCAT(name, __Handle);
 
 #define FSTD_MODULE_EXPORT() FSTD_MODULE_EXPORT_NAMED(FSTD_IDENT(fstd__module_export_))
 #define FSTD_MODULE_EXPORT_NAMED(name) FSTD__MODULE_EXPORT(name, FSTD_IDENT(FSTD_CONCAT(fstd__module_export_, name)))
