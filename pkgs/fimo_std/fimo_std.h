@@ -3849,8 +3849,9 @@ namespace fstd {
         using const_reverse_iterator = std::reverse_iterator<const T *>;
 
         inline constexpr Slice() noexcept = default;
-        template<std::enable_if_t<std::is_same_v<std::remove_cv_t<T>, char>, bool> = true>
-        inline constexpr Slice(T *it) noexcept : ptr{it}, len{std::char_traits<T>::length(it)} {}
+        inline constexpr Slice(T *it) noexcept
+            requires std::is_same_v<std::remove_const_t<T>, char>
+            : ptr{it}, len{std::char_traits<std::remove_const_t<T>>::length(it)} {}
         template<typename It>
         inline constexpr Slice(It first, usize count) noexcept : ptr{std::to_address(first)}, len{count} {}
         template<typename It, typename End>

@@ -135,7 +135,7 @@ typedef struct FWRLD_SysDesc {
             /// Whether to serialize the execution of the systems in the set.
             bool serialize;
             /// List of sub-systems in the set.
-            FSTD_SliceConst(struct FWRLD_SysDesc *const) sub_desc;
+            FSTD_SliceConst(struct FWRLD_SysDesc) sub_desc;
         } set;
     };
 } FWRLD_SysDesc;
@@ -241,68 +241,329 @@ FSTD_SYM_FN(FWRLD_Sym_SysDeinit, FWRLD__SYM_ID("sys_deinit"), void, FWRLD_Sys sy
 
 #ifdef __cplusplus
 
+#include <tuple>
+
 namespace fworlds {
-    /// A handle to a resource in a world.
-    ///
-    /// The handle uniquely identifies the resource in the world.
+    /// Descriptor for a resource.
+    struct WorldDesc {
+        /// Optional label of the world.
+        fstd::Slice<const char> label;
+    };
+
+    template<typename T>
+    struct ResDesc;
     template<typename T>
     struct Res;
+
+    struct SchedulerDesc;
+    struct Scheduler;
+
+    /// A collection of resources and systems.
+    struct World {
+        FWRLD_World handle;
+
+        /// Initializes a new empty world.
+        static inline auto init(const WorldDesc &desc) noexcept -> std::expected<World, fstd::Status> {
+            World world{};
+            FWRLD_WorldDesc d{.label = desc.label};
+            auto status = fwrld_world_init(&world.handle, &d);
+            if (status != FSTD_Status_Ok)
+                return std::unexpected(static_cast<fstd::Status>(status));
+            return world;
+        }
+
+        /// Deinitializes an empty world.
+        inline auto deinit() const noexcept -> void {
+            if (this->handle)
+                fwrld_world_deinit(this->handle);
+        }
+
+        /// Adds a new resource to the world.
+        template<typename T>
+        [[nodiscard]]
+        inline auto add_res(const ResDesc<T> &desc) const noexcept -> Res<T>;
+
+        /// Adds an empty scheduler to the world.
+        [[nodiscard]]
+        inline auto add_scheduler(const SchedulerDesc &desc) const noexcept -> Scheduler;
+    };
 
     /// Descriptor for a resource.
     template<typename T>
     struct ResDesc {
         /// Optional label of the resource.
-        FSTD_StrConst label;
+        fstd::Slice<const char> label;
         /// Pointer to the resource.
         T *value;
     };
 
-    /// Adds a new resource to the world.
+    /// A handle to a resource in a world.
+    ///
+    /// The handle uniquely identifies the resource in the world.
+    template<typename T>
+    struct Res {
+        FWRLD_Res handle;
+
+        inline constexpr operator Res<void>() noexcept { return {this->handle}; }
+
+        /// Invalidates the resource.
+        ///
+        /// The resource may not be in use.
+        inline auto deinit() const noexcept -> void;
+
+        /// Acquires the resource with read access.
+        ///
+        /// __NOTE__: This may inhibit the scheduling of systems, as it is a valid implementation
+        /// strategy to acquire all necessary resources before executing any system.
+        [[nodiscard("the resource must be unlocked")]]
+        inline auto lock_read() const noexcept -> T *;
+
+        /// Unlocks a resource acquired with read access.
+        inline auto unlock_read() const noexcept -> void;
+
+        /// Acquires the resource with write access.
+        ///
+        /// __NOTE__: This may inhibit the scheduling of systems, as it is a valid implementation
+        /// strategy to acquire all necessary resources before executing any system.
+        [[nodiscard("the resource must be unlocked")]]
+        inline auto lock_write() const noexcept -> T *;
+
+        /// Unlocks a resource acquired with write access.
+        inline auto unlock_write() const noexcept -> void;
+    };
+
+    /// Descriptor for a resource.
+    struct SchedulerDesc {
+        /// Optional label of the scheduler.
+        fstd::Slice<const char> label;
+        /// Optional executor for the scheduler.
+        ///
+        /// If no scheduler is provided, the scheduler will be created in
+        /// single threaded mode. And all systems will be run in the thread
+        /// that starts the schedule operation.
+        FTSK_Executor *FSTD_MAYBE_NULL executor;
+    };
+
+    struct SysDesc;
+    struct Sys;
+
+    /// Handle to a system scheduler within a world.
+    struct Scheduler {
+        FWRLD_Scheduler handle;
+
+        /// Deinitializes an empty world.
+        inline auto deinit() const noexcept -> void {
+            if (this->handle)
+                fwrld_scheduler_deinit(this->handle);
+        }
+
+        /// Adds a system(-set) to the scheduler.
+        [[nodiscard]]
+        inline auto add_sys(const SysDesc &desc) const noexcept -> std::expected<Sys, fstd::Status>;
+
+        /// Starts a new run of the systems, blocking the current thread until it completes.
+        inline auto run(fstd::Arena &arena) const noexcept -> void { fwrld_scheduler_run(this->handle, &arena); }
+
+        /// Schedules the systems of the scheduler to be run asynchronously.
+        ///
+        /// Multiple concurrent schedule operations are serialized. The arena must remain valid until `completion` is
+        /// signaled. The systems will start running after `start` is signaled. If no executor is associated with the
+        /// scheduler, this operation will block the calling thread until all systems are run.
+        inline auto schedule(fstd::Arena &arena, FTSK_Fence *FSTD_MAYBE_NULL start,
+                             FTSK_Fence *FSTD_MAYBE_NULL completion) const noexcept -> void {
+            fwrld_scheduler_schedule(this->handle, &arena, start, completion);
+        }
+
+        /// Blocks the calling thread until all scheduled operations are completed.
+        inline auto flush() const noexcept -> void { fwrld_scheduler_flush(this->handle); }
+    };
+
+    /// A handle to a registered system(-set).
+    ///
+    /// The handle uniquely identifies the system(-set) in the scheduler.
+    struct Sys {
+        FWRLD_Sys handle;
+
+        /// Removes the system from the scheduler.
+        ///
+        /// The handle is invalidated after calling this function.
+        /// The operation signals the fence on completion.
+        /// If no fence is provided, this function blocks until completion.
+        inline auto deinit(FTSK_Fence *FSTD_MAYBE_NULL fence = nullptr) const noexcept -> void {
+            if (this->handle)
+                fwrld_sys_deinit(this->handle, fence);
+            else if (fence)
+                ftsk_fence_signal(fence);
+        }
+    };
+
+    /// Arguments passed to a system function.
+    ///
+    /// Should not be copied, as it may be extended in the future.
+    template<typename Read, typename Write>
+    struct SysArgs {
+        World world;
+        Scheduler sched;
+        fstd::Arena &arena;
+        Read read;
+        Write write;
+    };
+
+    template<typename... Ts>
+    struct ResList {
+        std::array<Res<void>, sizeof...(Ts)> list;
+
+        ResList(Res<Ts>... args) noexcept : list{args.handle...} {}
+        inline operator fstd::Slice<const Res<void>>() const noexcept { return this->list; }
+    };
+
+    template<typename... Ts>
+    struct ResArgs {
+        fstd::Slice<const void *> list;
+
+        template<fstd::usize Index>
+        inline auto get() const noexcept -> std::tuple_element_t<Index, std::tuple<Ts...>> * {
+            using T = std::tuple_element_t<Index, std::tuple<Ts...>>;
+            return static_cast<T *>((const_cast<void *>(this->list[Index])));
+        }
+    };
+
+    struct CondDesc {
+        fstd::Slice<const Res<void>> read;
+        fstd::Slice<const Res<void>> write;
+        void *FSTD_MAYBE_NULL data;
+        FWRLD_SysCond condition;
+
+
+        template<typename... Read, typename... Write, typename F>
+        static inline constexpr auto init(fstd::Slice<const char> label, const ResList<Read...> &read,
+                                          const ResList<Write...> &write, F) noexcept -> CondDesc {
+            return {
+                    .label = label,
+                    .read = read,
+                    .write = write,
+                    .data = nullptr,
+                    .system = +[](void *, const FWRLD_SysArgs *args) -> bool {
+                        const SysArgs<ResArgs<Read...>, ResArgs<Write...>> args2 = {
+                                .world = {args->world},
+                                .sched = {args->sched},
+                                .arena = *static_cast<fstd::Arena *>(args->arena),
+                                .read = {.list = {args->read.ptr, args->read.len}},
+                                .write = {.list = {args->write.ptr, args->write.len}},
+                        };
+                        return std::invoke_r<bool>(F{}, args2);
+                    },
+            };
+        }
+    };
+
+    struct SysDescSys {
+        fstd::Slice<const char> label;
+        fstd::Slice<const Res<void>> read;
+        fstd::Slice<const Res<void>> write;
+        void *FSTD_MAYBE_NULL data;
+        FWRLD_SysRun system;
+
+        template<typename... Read, typename... Write, typename F>
+        static inline constexpr auto init(fstd::Slice<const char> label, const ResList<Read...> &read,
+                                          const ResList<Write...> &write, F) noexcept -> SysDescSys {
+            return {
+                    .label = label,
+                    .read = read,
+                    .write = write,
+                    .data = nullptr,
+                    .system = +[](void *, const FWRLD_SysArgs *args) -> FTSK_Fence *FSTD_MAYBE_NULL {
+                        const SysArgs<ResArgs<Read...>, ResArgs<Write...>> args2 = {
+                                .world = {args->world},
+                                .sched = {args->sched},
+                                .arena = *static_cast<fstd::Arena *>(args->arena),
+                                .read = {.list = {args->read.ptr, args->read.len}},
+                                .write = {.list = {args->write.ptr, args->write.len}},
+                        };
+                        using Ret = decltype((F{})(args2));
+                        if constexpr (std::is_same_v<Ret, void>) {
+                            std::invoke_r<void>(F{}, args2);
+                            return nullptr;
+                        }
+                        else {
+                            return std::invoke_r<FTSK_Fence * FSTD_MAYBE_NULL>(F{}, args2);
+                        }
+                    },
+            };
+        }
+    };
+
+    struct SysDescSet {
+        bool serialize;
+        fstd::Slice<const SysDesc> sub_desc;
+    };
+
+    /// Description of a system(-set).
+    struct SysDesc {
+        // NOLINTNEXTLINE(performance-enum-size)
+        enum class Tag : fstd::i32 { Sys = FWRLD_SysDescTag_Sys, Set = FWRLD_SysDescTag_Set };
+
+        Tag tag;
+        fstd::Slice<const Sys> before;
+        fstd::Slice<const Sys> after;
+        fstd::Slice<const CondDesc> conditions;
+        union {
+            SysDescSys sys;
+            SysDescSet set;
+        };
+    };
+
+    template<typename T>
+    inline auto Res<T>::deinit() const noexcept -> void {
+        if (this->handle)
+            fwrld_resource_deinit(this->handle);
+    }
+
+    template<typename T>
+    [[nodiscard("the resource must be unlocked")]]
+    inline auto Res<T>::lock_read() const noexcept -> T * {
+        reinterpret_cast<T *>(fwrld_resource_lock_read(this->handle));
+    }
+
+    template<typename T>
+    inline auto Res<T>::unlock_read() const noexcept -> void {
+        fwrld_resource_unlock_read(this->handle);
+    }
+
+    template<typename T>
+    [[nodiscard("the resource must be unlocked")]]
+    inline auto Res<T>::lock_write() const noexcept -> T * {
+        reinterpret_cast<T *>(fwrld_resource_lock_write(this->handle));
+    }
+
+    template<typename T>
+    inline auto Res<T>::unlock_write() const noexcept -> void {
+        fwrld_resource_unlock_write(this->handle);
+    }
+
     template<typename T>
     [[nodiscard]]
-    fstd_util auto world_add_res(FWRLD_World world, const ResDesc<T> &desc) noexcept -> Res<T> * {
-        FWRLD_Res res = fwrld_world_add_res(world, reinterpret_cast<const FWRLD_ResDesc *>(&desc));
-        return reinterpret_cast<Res<T> *>(res);
+    inline auto World::add_res(const ResDesc<T> &desc) const noexcept -> Res<T> {
+        FWRLD_ResDesc d{.label = desc.label, .value = desc.value};
+        return {fwrld_world_add_res(this->handle, &d)};
     }
 
-    /// Invalidates the resource.
-    ///
-    /// The resource may not be in use.
-    template<typename T>
-    fstd_util auto resource_deinit(Res<T> *res) noexcept -> void {
-        return fwrld_resource_deinit(reinterpret_cast<FWRLD_Res>(res));
+    /// Adds an empty scheduler to the world.
+    [[nodiscard]]
+    inline auto World::add_scheduler(const SchedulerDesc &desc) const noexcept -> Scheduler {
+        FWRLD_SchedulerDesc d{.label = desc.label, .executor = desc.executor};
+        return {fwrld_world_add_scheduler(this->handle, &d)};
     }
 
-    /// Acquires the resource with read access.
-    ///
-    /// __NOTE__: This may inhibit the scheduling of systems, as it is a valid implementation
-    /// strategy to acquire all necessary resources before executing any system.
-    template<typename T>
-    [[nodiscard("the resource must be unlocked")]]
-    fstd_util auto resource_lock_read(Res<T> *res) noexcept -> T * {
-        return reinterpret_cast<T *>(fwrld_resource_lock_read(reinterpret_cast<FWRLD_Res>(res)));
-    }
 
-    /// Unlocks a resource acquired with read access.
-    template<typename T>
-    fstd_util auto resource_unlock_read(Res<T> *res) noexcept -> void {
-        return fwrld_resource_unlock_read(reinterpret_cast<FWRLD_Res>(res));
-    }
-
-    /// Acquires the resource with write access.
-    ///
-    /// __NOTE__: This may inhibit the scheduling of systems, as it is a valid implementation
-    /// strategy to acquire all necessary resources before executing any system.
-    template<typename T>
-    [[nodiscard("the resource must be unlocked")]]
-    fstd_util auto resource_lock_write(Res<T> *res) noexcept -> T * {
-        return reinterpret_cast<T *>(fwrld_resource_lock_write(reinterpret_cast<FWRLD_Res>(res)));
-    }
-
-    /// Unlocks a resource acquired with write access.
-    template<typename T>
-    fstd_util auto resource_unlock_write(Res<T> *res) noexcept -> void {
-        return fwrld_resource_unlock_write(reinterpret_cast<FWRLD_Res>(res));
+    [[nodiscard]]
+    inline auto Scheduler::add_sys(const SysDesc &desc) const noexcept -> std::expected<Sys, fstd::Status> {
+        Sys sys{};
+        const FWRLD_SysDesc *d = reinterpret_cast<const FWRLD_SysDesc *>(&desc);
+        auto status = fwrld_scheduler_add_sys(this->handle, d, &sys.handle);
+        if (status != FSTD_Status_Ok)
+            return std::unexpected(static_cast<fstd::Status>(status));
+        return sys;
     }
 } // namespace fworlds
 

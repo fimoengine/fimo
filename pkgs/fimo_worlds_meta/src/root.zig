@@ -618,7 +618,7 @@ pub const Sys = opaque {
                 /// Whether to serialize the execution of the systems in the set.
                 serialize: bool = false,
                 /// List of sub-systems in the set.
-                sub_desc: SliceConst(*const Desc),
+                sub_desc: SliceConst(Desc),
             },
         },
     };
@@ -671,9 +671,8 @@ test "Sys: duplicate description" {
     const scheduler = Scheduler.init(world, .{ .label = .fromSlice("my scheduler") });
     defer scheduler.deinit();
 
-    var desc: Sys.Desc = undefined;
-    var sub_desc: [1]*const Sys.Desc = .{&desc};
-    desc = .{
+    var sub_desc: [1]Sys.Desc = .{undefined};
+    sub_desc[0] = .{
         .tag = .set,
         .data = .{
             .set = .{
@@ -681,7 +680,7 @@ test "Sys: duplicate description" {
             },
         },
     };
-    try std.testing.expectError(error.OperationFailed, scheduler.addSys(desc));
+    try std.testing.expectError(error.OperationFailed, scheduler.addSys(sub_desc[0]));
 }
 
 test "Sys: cyclic dependency" {

@@ -323,7 +323,7 @@ pub const SysDesc = struct {
         },
         set: struct {
             serialize: bool,
-            sub_desc: []const *const SysDesc,
+            sub_desc: []const SysDesc,
         },
     },
 
@@ -374,7 +374,7 @@ pub const SysDesc = struct {
                 },
                 .set => {
                     const next_set = next_c.data.set;
-                    const sub_desc = try allocator.alloc(*const SysDesc, next_set.sub_desc.len);
+                    const sub_desc = try allocator.alloc(SysDesc, next_set.sub_desc.len);
                     next_desc.data = .{
                         .set = .{
                             .serialize = next_set.serialize,
@@ -382,10 +382,8 @@ pub const SysDesc = struct {
                         },
                     };
 
-                    for (sub_desc, next_set.sub_desc.intoSliceOrEmpty()) |*dst, src| {
-                        const d = try allocator.create(SysDesc);
-                        dst.* = d;
-                        try stack.append(std_allocator, .{ src, d });
+                    for (sub_desc, next_set.sub_desc.intoSliceOrEmpty()) |*dst, *src| {
+                        try stack.append(std_allocator, .{ src, dst });
                     }
                 },
                 else => return error.UnknownTag,
@@ -857,7 +855,7 @@ pub const Scheduler = struct {
                     if (set_desc.sub_desc.len == 0) return error.EmptySubSet;
                     var last: ?*const SysDesc = null;
                     var it = std.mem.reverseIterator(set_desc.sub_desc);
-                    while (it.next()) |sub_desc| : (last = sub_desc) {
+                    while (it.nextPtr()) |sub_desc| : (last = sub_desc) {
                         if (desc_map.get(sub_desc) != null) return error.DuplicateDesc;
                         try desc_map.put(std_allocator, sub_desc, .empty);
                         try remaining.append(std_allocator, .{
