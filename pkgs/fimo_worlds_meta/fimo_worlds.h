@@ -522,7 +522,7 @@ namespace fworlds {
     template<typename T>
     [[nodiscard("the resource must be unlocked")]]
     inline auto Res<T>::lock_read() const noexcept -> T * {
-        reinterpret_cast<T *>(fwrld_resource_lock_read(this->handle));
+        return static_cast<T *>(fwrld_resource_lock_read(this->handle));
     }
 
     template<typename T>
@@ -533,7 +533,7 @@ namespace fworlds {
     template<typename T>
     [[nodiscard("the resource must be unlocked")]]
     inline auto Res<T>::lock_write() const noexcept -> T * {
-        reinterpret_cast<T *>(fwrld_resource_lock_write(this->handle));
+        return static_cast<T *>(fwrld_resource_lock_write(this->handle));
     }
 
     template<typename T>
