@@ -422,9 +422,9 @@ namespace fworlds {
         fstd::Slice<const void *> list;
 
         template<fstd::usize Index>
-        inline auto get() const noexcept -> std::tuple_element_t<Index, std::tuple<Ts...>> * {
+        inline auto get() const noexcept -> std::tuple_element_t<Index, std::tuple<Ts...>> & {
             using T = std::tuple_element_t<Index, std::tuple<Ts...>>;
-            return static_cast<T *>((const_cast<void *>(this->list[Index])));
+            return *static_cast<T *>((const_cast<void *>(this->list[Index])));
         }
     };
 
