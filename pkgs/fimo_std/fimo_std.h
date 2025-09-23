@@ -2184,7 +2184,7 @@ typedef struct {
 /// This function can be used to check whether to call into the subsystem at all. Calling this
 /// function is not necessary, as the remaining functions of the subsystem are guaranteed to return
 /// default values, in case the subsystem is disabled.
-fstd_func void fstd_tracing_is_enabled(void);
+fstd_func bool fstd_tracing_is_enabled(void);
 
 /// Registers the calling thread with the tracing subsystem.
 ///
@@ -2550,19 +2550,19 @@ enum {
 };
 
 /// Access group for a module parameter.
-typedef FSTD_I32 FSTD_ModuleAccesGroup;
+typedef FSTD_I32 FSTD_ModuleAccessGroup;
 enum {
-    FSTD_ModuleAccessGroup_Public = (FSTD_ModuleAccesGroup)0,
-    FSTD_ModuleAccessGroup_Dependency = (FSTD_ModuleAccesGroup)1,
-    FSTD_ModuleAccessGroup_Private = (FSTD_ModuleAccesGroup)2,
+    FSTD_ModuleAccessGroup_Public = (FSTD_ModuleAccessGroup)0,
+    FSTD_ModuleAccessGroup_Dependency = (FSTD_ModuleAccessGroup)1,
+    FSTD_ModuleAccessGroup_Private = (FSTD_ModuleAccessGroup)2,
     FSTD__ModuleAccessGroup_ = FSTD_I32_MAX,
 };
 
 /// Data type and access groups of a module parameter.
 typedef struct {
     FSTD_ModuleParamTag tag;
-    FSTD_ModuleAccesGroup read_group;
-    FSTD_ModuleAccesGroup write_group;
+    FSTD_ModuleAccessGroup read_group;
+    FSTD_ModuleAccessGroup write_group;
 } FSTD_ModuleParamInfo;
 
 /// A type-erased module parameter.
@@ -3277,8 +3277,8 @@ FSTD_CHECK_USE fstd_func FSTD_ModuleLoaderCommitResult fstd_module_loader_commit
 typedef struct {
     FSTD_StrConst name;
     FSTD_ModuleParamTag tag;
-    FSTD_ModuleAccesGroup read_group;
-    FSTD_ModuleAccesGroup write_group;
+    FSTD_ModuleAccessGroup read_group;
+    FSTD_ModuleAccessGroup write_group;
     void (*read)(FSTD_ModuleParamData data, void *value);
     void (*write)(FSTD_ModuleParamData data, const void *value);
     union {
@@ -3764,13 +3764,14 @@ struct FSTD_Ctx {
 #include <array>
 #include <atomic>
 #include <compare>
+#include <concepts>
 #include <expected>
 #include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
 #include <type_traits>
-#include <utility>
+#include <variant>
 
 namespace fstd {
 
@@ -3786,7 +3787,7 @@ namespace fstd {
     using u64 = FSTD_U64;
     using usize = FSTD_USize;
 
-    fstd_util auto next_pow_of_two(auto v) noexcept -> decltype(v) {
+    fstd_util auto nextPowOfTwo(auto v) noexcept -> decltype(v) {
         using T = decltype(v);
         if constexpr (std::is_same_v<T, u8>) {
             return fstd_next_power_of_two_u8(v);
@@ -3808,7 +3809,7 @@ namespace fstd {
         }
     }
 
-    fstd_util auto is_pow_of_two(auto v) noexcept -> bool {
+    fstd_util auto isPowOfTwo(auto v) noexcept -> bool {
         using T = decltype(v);
         if constexpr (std::is_same_v<T, u8>) {
             return fstd_is_power_of_two_u8(v);
@@ -3835,61 +3836,61 @@ namespace fstd {
         T *ptr;
         usize len;
 
-        using element_type = T;
-        using value_type = std::remove_cv_t<T>;
-        using size_type = usize;
-        using difference_type = isize;
-        using pointer = T *;
-        using const_pointer = const T *;
-        using reference = T &;
-        using const_reference = const T &;
-        using iterator = T *;
-        using const_iterator = const T *;
-        using reverse_iterator = std::reverse_iterator<iterator>;
-        using const_reverse_iterator = std::reverse_iterator<const T *>;
+        using ElementType = T;
+        using ValueType = std::remove_cv_t<T>;
+        using SizeType = usize;
+        using DifferenceType = isize;
+        using Pointer = T *;
+        using ConstPointer = const T *;
+        using Reference = T &;
+        using ConstReference = const T &;
+        using Iterator = T *;
+        using ConstIterator = const T *;
+        using ReverseIterator = std::reverse_iterator<Iterator>;
+        using ConstReverseIterator = std::reverse_iterator<const T *>;
 
-        inline constexpr Slice() noexcept = default;
-        inline constexpr Slice(T *it) noexcept
+        constexpr Slice() noexcept = default;
+        constexpr Slice(T *it) noexcept
             requires std::is_same_v<std::remove_const_t<T>, char>
             : ptr{it}, len{std::char_traits<std::remove_const_t<T>>::length(it)} {}
         template<typename It>
-        inline constexpr Slice(It first, usize count) noexcept : ptr{std::to_address(first)}, len{count} {}
+        constexpr Slice(It first, usize count) noexcept : ptr{std::to_address(first)}, len{count} {}
         template<typename It, typename End>
-        inline constexpr Slice(It first, End last) noexcept : ptr{std::to_address(first)}, len{last - first} {}
+        constexpr Slice(It first, End last) noexcept : ptr{std::to_address(first)}, len{last - first} {}
         template<usize N>
-        inline constexpr Slice(std::type_identity_t<T> (&arr)[N]) noexcept : ptr{arr}, len{N} {}
+        constexpr Slice(std::type_identity_t<T> (&arr)[N]) noexcept : ptr{arr}, len{N} {}
         template<typename U, usize N>
-        inline constexpr Slice(std::array<U, N> &arr) noexcept : ptr{arr.data()}, len{N} {}
+        constexpr Slice(std::array<U, N> &arr) noexcept : ptr{arr.data()}, len{N} {}
         template<typename U, usize N>
-        inline constexpr Slice(const std::array<U, N> &arr) noexcept : ptr{arr.data()}, len{N} {}
-        inline constexpr Slice(const Slice &) noexcept = default;
-        inline constexpr Slice(Slice &&) noexcept = default;
+        constexpr Slice(const std::array<U, N> &arr) noexcept : ptr{arr.data()}, len{N} {}
+        constexpr Slice(const Slice &) noexcept = default;
+        constexpr Slice(Slice &&) noexcept = default;
 
-        inline constexpr Slice &operator=(const Slice &) noexcept = default;
-        inline constexpr Slice &operator=(Slice &&) noexcept = default;
+        constexpr Slice &operator=(const Slice &) noexcept = default;
+        constexpr Slice &operator=(Slice &&) noexcept = default;
 
-        inline constexpr auto begin() const noexcept -> iterator { return ptr; }
-        inline constexpr auto cbegin() const noexcept -> const_iterator { return ptr; }
+        constexpr Iterator begin() const noexcept { return ptr; }
+        constexpr ConstIterator cbegin() const noexcept { return ptr; }
 
-        inline constexpr auto end() const noexcept -> iterator { return ptr + len; }
-        inline constexpr auto cend() const noexcept -> const_iterator { return ptr + len; }
+        constexpr Iterator end() const noexcept { return ptr + len; }
+        constexpr ConstIterator cend() const noexcept { return ptr + len; }
 
-        inline constexpr auto rbegin() const noexcept -> reverse_iterator { return ptr + len; }
-        inline constexpr auto crbegin() const noexcept -> const_reverse_iterator { return ptr + len; }
+        constexpr ReverseIterator rbegin() const noexcept { return ptr + len; }
+        constexpr ConstReverseIterator crbegin() const noexcept { return ptr + len; }
 
-        inline constexpr auto rend() const noexcept -> reverse_iterator { return ptr; }
-        inline constexpr auto crend() const noexcept -> const_reverse_iterator { return ptr; }
+        constexpr ReverseIterator rend() const noexcept { return ptr; }
+        constexpr ConstReverseIterator crend() const noexcept { return ptr; }
 
-        inline constexpr auto front() const noexcept -> reference { return ptr[0]; }
-        inline constexpr auto back() const noexcept -> reference { return ptr[len - 1]; }
-        inline constexpr auto operator[](usize idx) const noexcept -> reference { return ptr[idx]; }
-        inline constexpr auto data() const noexcept -> pointer { return ptr; }
-        inline constexpr auto size() const noexcept -> usize { return len; }
-        inline constexpr auto size_bytes() const noexcept -> usize { return len * sizeof(*ptr); }
-        inline constexpr auto empty() const noexcept -> bool { return len == 0; }
+        constexpr Reference front() const noexcept { return ptr[0]; }
+        constexpr Reference back() const noexcept { return ptr[len - 1]; }
+        constexpr Reference operator[](usize idx) const noexcept { return ptr[idx]; }
+        constexpr Pointer data() const noexcept { return ptr; }
+        constexpr usize size() const noexcept { return len; }
+        constexpr usize sizeBytes() const noexcept { return len * sizeof(*ptr); }
+        constexpr bool empty() const noexcept { return len == 0; }
 
         template<typename U>
-        inline operator U() const noexcept {
+        constexpr operator U() const noexcept {
             return {.ptr = this->ptr, .len = this->len};
         }
     };
@@ -3901,28 +3902,37 @@ namespace fstd {
     // -----------------------------------------
 
     struct Allocator : FSTD_Allocator {
+        using Type = Allocator;
+        using FStd = FSTD_Allocator;
+        constexpr Allocator() noexcept = default;
+        constexpr Allocator(const FStd &other) noexcept : FStd(other) {};
+        constexpr Allocator(const Allocator &other) noexcept = default;
+        constexpr Allocator(Allocator &&other) noexcept = default;
+        constexpr Allocator &operator=(const Allocator &other) noexcept = default;
+        constexpr Allocator &operator=(Allocator &&other) noexcept = default;
+
         template<typename T>
-        FSTD_ALLOC inline auto alloc(usize n) const noexcept -> T *FSTD_MAYBE_NULL {
+        FSTD_ALLOC T *FSTD_MAYBE_NULL alloc(usize n) const noexcept {
             return static_cast<T *>(this->vtable->alloc(this->ptr, sizeof(T) * n, alignof(T)));
         }
         template<typename T>
-        inline auto resize(T *ptr, usize n, usize new_n) const noexcept -> bool {
+        bool resize(T *ptr, usize n, usize new_n) const noexcept {
             return this->vtable->resize(ptr, sizeof(T) * n, alignof(T), sizeof(T) * new_n);
         }
         template<typename T>
-        FSTD_ALLOC inline auto remap(T *ptr, usize n, usize new_n) const noexcept -> T *FSTD_MAYBE_NULL {
+        FSTD_ALLOC T *FSTD_MAYBE_NULL remap(T *ptr, usize n, usize new_n) const noexcept {
             return this->vtable->remap(ptr, sizeof(T) * n, alignof(T), sizeof(T) * new_n);
         }
         template<typename T>
-        inline auto free(T *ptr, usize n) const noexcept -> void {
+        void free(T *ptr, usize n) const noexcept {
             return this->vtable->free(ptr, sizeof(T) * n, alignof(T));
         }
         template<typename T>
-        FSTD_ALLOC inline auto create() const noexcept -> T *FSTD_MAYBE_NULL {
+        FSTD_ALLOC T *FSTD_MAYBE_NULL create() const noexcept {
             return this->alloc<T>(1);
         }
         template<typename T>
-        inline auto destroy(T *ptr) const noexcept -> void {
+        void destroy(T *ptr) const noexcept {
             return this->free(ptr, 1);
         }
     };
@@ -3930,84 +3940,99 @@ namespace fstd {
 
     struct Arena : FSTD_Arena {
         using Flags = FSTD_ArenaFlags;
-
-        inline Arena() noexcept = default;
-        inline Arena(const Arena &) = delete;
-        inline Arena(Arena &&other) noexcept :
-            FSTD_Arena{
-                    .grow_futex = other.grow_futex.load(std::memory_order_relaxed),
-                    .flags = other.flags,
-                    .page_size = other.page_size,
-                    .commit_len = other.commit_len.exchange(0, std::memory_order_relaxed),
-                    .ptr = std::exchange(other.ptr, nullptr),
-                    .pos = other.pos.exchange(0, std::memory_order_relaxed),
-            } {}
-        inline ~Arena() noexcept {
-            if (this->ptr)
-                fstd_arena_deinit(this);
-        }
-
-        inline constexpr Arena &operator=(const Arena &) noexcept = delete;
-        inline constexpr Arena &operator=(Arena &&other) noexcept {
+        using Type = Allocator;
+        using FStd = FSTD_Arena;
+        constexpr Arena() noexcept = default;
+        constexpr Arena(const FStd &other) noexcept :
+            FStd{.grow_futex = other.grow_futex.load(std::memory_order_relaxed),
+                 .flags = other.flags,
+                 .page_size = other.page_size,
+                 .commit_len = other.commit_len.load(std::memory_order_relaxed),
+                 .ptr = other.ptr,
+                 .pos = other.pos.load(std::memory_order_relaxed)} {};
+        constexpr Arena(const Arena &other) noexcept :
+            FStd{.grow_futex = other.grow_futex.load(std::memory_order_relaxed),
+                 .flags = other.flags,
+                 .page_size = other.page_size,
+                 .commit_len = other.commit_len.load(std::memory_order_relaxed),
+                 .ptr = other.ptr,
+                 .pos = other.pos.load(std::memory_order_relaxed)} {};
+        constexpr Arena(Arena &&other) noexcept :
+            FStd{.grow_futex = other.grow_futex.load(std::memory_order_relaxed),
+                 .flags = other.flags,
+                 .page_size = other.page_size,
+                 .commit_len = other.commit_len.load(std::memory_order_relaxed),
+                 .ptr = other.ptr,
+                 .pos = other.pos.load(std::memory_order_relaxed)} {};
+        constexpr Arena &operator=(const Arena &other) noexcept {
             if (this != &other) {
-                if (this->ptr)
-                    fstd_arena_deinit(this);
                 this->grow_futex = other.grow_futex.load(std::memory_order_relaxed);
                 this->flags = other.flags;
                 this->page_size = other.page_size;
-                this->commit_len = other.commit_len.exchange(0, std::memory_order_relaxed);
-                this->ptr = std::exchange(other.ptr, nullptr);
-                this->pos = other.pos.exchange(0, std::memory_order_relaxed);
+                this->commit_len = other.commit_len.load(std::memory_order_relaxed);
+                this->ptr = other.ptr;
+                this->pos = other.pos.load(std::memory_order_relaxed);
             }
             return *this;
-        };
+        }
+        constexpr Arena &operator=(Arena &&other) noexcept {
+            if (this != &other) {
+                this->grow_futex = other.grow_futex.load(std::memory_order_relaxed);
+                this->flags = other.flags;
+                this->page_size = other.page_size;
+                this->commit_len = other.commit_len.load(std::memory_order_relaxed);
+                this->ptr = other.ptr;
+                this->pos = other.pos.load(std::memory_order_relaxed);
+            }
+            return *this;
+        }
 
-        static inline auto init(void *base, Flags flags, usize reserve, usize commit) noexcept -> std::optional<Arena> {
+        static std::optional<Arena> init(void *base, Flags flags, usize reserve, usize commit) noexcept {
             Arena arena{};
             if (!fstd_arena_init(&arena, base, flags, reserve, commit))
                 return std::nullopt;
             return arena;
         }
-        static inline auto init(Flags flags, usize reserve, usize commit) noexcept -> std::optional<Arena> {
+        static std::optional<Arena> init(Flags flags, usize reserve, usize commit) noexcept {
             return init(nullptr, flags, reserve, commit);
         }
-        static inline auto init(usize reserve, usize commit) noexcept -> std::optional<Arena> {
+        static std::optional<Arena> init(usize reserve, usize commit) noexcept {
             return init(nullptr, 0, reserve, commit);
         }
-        static inline auto init(Flags flags, usize size) noexcept -> std::optional<Arena> {
-            return init(nullptr, flags, size, size);
+        static std::optional<Arena> init(Flags flags, usize size) noexcept { return init(nullptr, flags, size, size); }
+        static std::optional<Arena> init(usize size) noexcept { return init(nullptr, 0, size, size); }
+        void deinit() noexcept {
+            if (this->ptr)
+                fstd_arena_deinit(this);
         }
-        static inline auto init(usize size) noexcept -> std::optional<Arena> { return init(nullptr, 0, size, size); }
-
-        inline auto grow(usize new_size) noexcept -> void { fstd_arena_grow(this, new_size); }
-
+        void grow(usize new_size) noexcept { fstd_arena_grow(this, new_size); }
         template<typename T>
-        inline auto push(usize n) noexcept -> T * {
+        T *push(usize n) noexcept {
             return static_cast<T *>(fstd__arena_push(this, sizeof(T) * n, alignof(T)));
         }
         template<typename T>
-        inline auto push_zero(usize n) noexcept -> T * {
+        T *pushZero(usize n) noexcept {
             return static_cast<T *>(fstd__arena_push_zero(this, sizeof(T) * n, alignof(T)));
         }
         template<typename T>
-        inline auto pop(usize n) noexcept -> void {
+        void pop(usize n) noexcept {
             return fstd__arena_pop(this, sizeof(T) * n);
         }
         template<typename T>
-        inline auto resize(T FSTD_MAYBE_NULL *ptr, usize n, usize new_n) noexcept -> bool {
+        bool resize(T FSTD_MAYBE_NULL *ptr, usize n, usize new_n) noexcept {
             return fstd__arena_resize(this, ptr, sizeof(T) * n, sizeof(T) * new_n);
         }
         template<typename T>
-        inline auto remap(T FSTD_MAYBE_NULL *ptr, usize n, usize new_n) noexcept -> T *FSTD_MAYBE_NULL {
+        T *FSTD_MAYBE_NULL remap(T FSTD_MAYBE_NULL *ptr, usize n, usize new_n) noexcept {
             return fstd__arena_remap(this, ptr, sizeof(T) * n, alignof(T), sizeof(T) * new_n);
         }
         template<typename T>
-        inline auto free(T FSTD_MAYBE_NULL *ptr, usize n) noexcept -> void {
+        void free(T FSTD_MAYBE_NULL *ptr, usize n) noexcept {
             return fstd__arena_free(this, ptr, sizeof(T) * n);
         }
 
-        inline auto get_pos() noexcept -> usize { return fstd_arena_get_pos(this); }
-        inline auto set_pos(usize pos) noexcept -> void { return fstd_arena_set_pos(this, pos); }
+        usize getPos() noexcept { return fstd_arena_get_pos(this); }
+        void setPos(usize pos) noexcept { return fstd_arena_set_pos(this, pos); }
     };
 
     // -----------------------------------------
@@ -4015,7 +4040,7 @@ namespace fstd {
     // -----------------------------------------
 
     // NOLINTNEXTLINE(performance-enum-size)
-    enum class Status : i32 {
+    enum class Status : FSTD_Status {
         Ok = FSTD_Status_Ok,
         Failure = FSTD_Status_Failure,
         FailureUnknown = FSTD_Status_FailureNoReport,
@@ -4024,43 +4049,60 @@ namespace fstd {
     enum class PlatformError : FSTD_PlatformError {};
 
     struct Result : FSTD_Result {
-        inline Result() noexcept : FSTD_Result{FSTD_Result_Ok} {};
+        using Type = Result;
+        using FStd = FSTD_Result;
+        constexpr Result() noexcept = default;
+        constexpr Result(const FStd &other) noexcept : FStd(other) {};
+        constexpr Result(const Result &other) noexcept = default;
+        constexpr Result(Result &&other) noexcept = default;
+        constexpr Result &operator=(const Result &other) noexcept = default;
+        constexpr Result &operator=(Result &&other) noexcept = default;
+
         template<typename T>
-        inline Result(T) noexcept;
-        inline Result(FSTD_Result result) : FSTD_Result{result} {};
-        inline Result(const Result &) = delete;
-        inline Result(Result &&other) noexcept :
-            FSTD_Result{
-                    .data = std::exchange(other.data, nullptr),
-                    .vtable = std::exchange(other.vtable, nullptr),
-            } {}
-        inline ~Result() noexcept {
+        static Result init(T) noexcept;
+        void deinit() noexcept {
             if (this->vtable)
                 fstd_result_deinit(*this);
         }
-
-        template<>
-        inline Result(PlatformError err) noexcept :
-            FSTD_Result{fstd_result_init_platform_error(static_cast<FSTD_PlatformError>(err))} {}
-
-        inline constexpr auto operator=(const Result &) noexcept -> Result & = delete;
-        inline auto operator=(Result &&other) noexcept -> Result & {
-            if (this != &other) {
-                if (this->vtable)
-                    fstd_result_deinit(*this);
-                this->data = std::exchange(other.data, nullptr);
-                this->vtable = std::exchange(other.vtable, nullptr);
-            }
-            return *this;
-        };
-
-        inline constexpr auto is_ok() const noexcept -> bool {
-            return this->vtable->cls.qwords[0] == FSTD_U64_MAX && this->vtable->cls.qwords[1] == FSTD_U64_MAX;
-        }
-        inline constexpr auto is_err() const noexcept -> bool { return !this->is_ok(); }
-        inline auto write(Slice<char> dst, usize offset, usize &remaining) const noexcept -> usize {
+        bool isOk() const noexcept { return fstd_result_is_ok(*this); }
+        bool isErr() const noexcept { return fstd_result_is_err(*this); }
+        usize write(Slice<char> dst, usize offset, usize &remaining) const noexcept {
             return fstd_result_write(*this, dst, offset, &remaining);
         }
+    };
+
+    template<>
+    inline Result Result::init(FSTD_PlatformError err) noexcept {
+        return fstd_result_init_platform_error(static_cast<FSTD_PlatformError>(err));
+    }
+    template<>
+    inline Result Result::init(PlatformError err) noexcept {
+        return Result::init(static_cast<FSTD_PlatformError>(err));
+    }
+
+    // -----------------------------------------
+    // version ---------------------------------
+    // -----------------------------------------
+
+    struct Version : FSTD_Version {
+        using Type = Version;
+        using FStd = FSTD_Version;
+        constexpr Version() noexcept = default;
+        constexpr Version(const FStd &other) noexcept : FStd(other) {};
+        constexpr Version(const Version &other) noexcept = default;
+        constexpr Version(Version &&other) noexcept = default;
+        constexpr Version &operator=(const Version &other) noexcept = default;
+        constexpr Version &operator=(Version &&other) noexcept = default;
+        friend constexpr std::strong_ordering operator<=>(Version lhs, Version rhs) {
+            auto order = fstd_version_order(&lhs, &rhs);
+            if (order < 0)
+                return std::strong_ordering::less;
+            if (order > 0)
+                return std::strong_ordering::greater;
+            return std::strong_ordering::equivalent;
+        }
+
+        bool sattisfies(const Version &required) const noexcept { return fstd_version_sattisfies(this, &required); }
     };
 
     // -----------------------------------------
@@ -4070,185 +4112,159 @@ namespace fstd {
     using TimeInt = FSTD_TimeInt;
 
     struct Duration : FSTD_Duration {
-        static constexpr inline auto init_secs(u64 s) -> Duration { return {FSTD_SECONDS(s)}; }
-        static constexpr inline auto init_millis(u64 ms) -> Duration { return {FSTD_MILLIS(ms)}; }
-        static constexpr inline auto init_micros(u64 us) -> Duration { return {FSTD_MICROS(us)}; }
-        static constexpr inline auto init_nanos(u64 ns) -> Duration { return {FSTD_NANOS(ns)}; }
-
-        inline auto secs() const noexcept -> u64 { return fstd_duration_secs(*this); }
-        inline auto subsec_millis() const noexcept -> u32 { return fstd_duration_subsec_millis(*this); }
-        inline auto subsec_micros() const noexcept -> u32 { return fstd_duration_subsec_micros(*this); }
-        inline auto subsec_nanos() const noexcept -> u32 { return fstd_duration_subsec_nanos(*this); }
-        inline auto millis() const noexcept -> TimeInt { return fstd_duration_millis(*this); }
-        inline auto micros() const noexcept -> TimeInt { return fstd_duration_micros(*this); }
-        inline auto nanos() const noexcept -> TimeInt { return fstd_duration_nanos(*this); }
-
-        inline auto add(Duration other) const noexcept -> std::expected<Duration, Result> {
-            Duration result{};
-            Result status = fstd_duration_add(&result, *this, other);
-            if (status.is_err())
-                return std::unexpected(std::move(status));
-            return result;
-        }
-        inline auto add_sat(Duration other) const noexcept -> Duration {
-            return {fstd_duration_add_saturating(*this, other)};
-        }
-
-        inline auto sub(Duration other) const noexcept -> std::expected<Duration, Result> {
-            Duration result{};
-            Result status = fstd_duration_sub(&result, *this, other);
-            if (status.is_err())
-                return std::unexpected(std::move(status));
-            return result;
-        }
-        inline auto sub_sat(Duration other) const noexcept -> Duration {
-            return {fstd_duration_sub_saturating(*this, other)};
-        }
-
-        inline auto operator+(Duration other) const noexcept -> Duration { return this->add_sat(other); }
-        inline auto operator+=(Duration other) noexcept -> Duration & {
-            *this = this->add_sat(other);
+        using Type = Duration;
+        using FStd = FSTD_Duration;
+        constexpr Duration() noexcept = default;
+        constexpr Duration(const FStd &other) noexcept : FStd(other) {};
+        constexpr Duration(const Duration &other) noexcept = default;
+        constexpr Duration(Duration &&other) noexcept = default;
+        constexpr Duration &operator=(const Duration &other) noexcept = default;
+        constexpr Duration &operator=(Duration &&other) noexcept = default;
+        Duration operator+(Duration other) const noexcept { return this->addSat(other); }
+        Duration &operator+=(Duration other) noexcept {
+            *this = this->addSat(other);
             return *this;
         }
-
-        inline auto operator-(Duration other) const noexcept -> Duration { return this->sub_sat(other); }
-        inline auto operator-=(Duration other) noexcept -> Duration & {
-            *this = this->sub_sat(other);
+        Duration operator-(Duration other) const noexcept { return this->subSat(other); }
+        Duration &operator-=(Duration other) noexcept {
+            *this = this->subSat(other);
             return *this;
         }
-
-        inline friend constexpr std::strong_ordering operator<=>(Duration lhs, Duration rhs) {
+        friend constexpr std::strong_ordering operator<=>(Duration lhs, Duration rhs) {
             if (lhs.secs() < rhs.secs())
                 return std::strong_ordering::less;
             if (lhs.secs() > rhs.secs())
                 return std::strong_ordering::greater;
-            if (lhs.subsec_nanos() < rhs.subsec_nanos())
+            if (lhs.subsecNanos() < rhs.subsecNanos())
                 return std::strong_ordering::less;
-            if (lhs.subsec_nanos() > rhs.subsec_nanos())
+            if (lhs.subsecNanos() > rhs.subsecNanos())
                 return std::strong_ordering::greater;
             return std::strong_ordering::equivalent;
         }
+
+        static constexpr auto initSecs(u64 s) -> Duration { return {FSTD_SECONDS(s)}; }
+        static constexpr auto initMillis(u64 ms) -> Duration { return {FSTD_MILLIS(ms)}; }
+        static constexpr auto initMicros(u64 us) -> Duration { return {FSTD_MICROS(us)}; }
+        static constexpr auto initNanos(u64 ns) -> Duration { return {FSTD_NANOS(ns)}; }
+
+        u64 secs() const noexcept { return fstd_duration_secs(*this); }
+        u32 subsecMillis() const noexcept { return fstd_duration_subsec_millis(*this); }
+        u32 subsecMicros() const noexcept { return fstd_duration_subsec_micros(*this); }
+        u32 subsecNanos() const noexcept { return fstd_duration_subsec_nanos(*this); }
+        TimeInt millis() const noexcept { return fstd_duration_millis(*this); }
+        TimeInt micros() const noexcept { return fstd_duration_micros(*this); }
+        TimeInt nanos() const noexcept { return fstd_duration_nanos(*this); }
+
+        std::expected<Duration, Result> add(Duration other) const noexcept {
+            Duration result{};
+            Result status = fstd_duration_add(&result, *this, other);
+            if (status.isErr())
+                return std::unexpected(status);
+            return result;
+        }
+        Duration addSat(Duration other) const noexcept { return {fstd_duration_add_saturating(*this, other)}; }
+
+        std::expected<Duration, Result> sub(Duration other) const noexcept {
+            Duration result{};
+            Result status = fstd_duration_sub(&result, *this, other);
+            if (status.isErr())
+                return std::unexpected(status);
+            return result;
+        }
+        Duration subSat(Duration other) const noexcept { return {fstd_duration_sub_saturating(*this, other)}; }
     };
-    inline static constexpr Duration DurationZero = {};
-    inline static constexpr Duration DurationMax = {FSTD_DURATION_MAX};
+    static constexpr Duration DurationZero = {};
+    static constexpr Duration DurationMax = {FSTD_DURATION_MAX};
 
     struct Time : FSTD_Time {
-        static inline auto now() noexcept -> Time { return {fstd_time_now()}; }
-        static inline auto elapsed(Time from) noexcept -> std::expected<Duration, Result> {
+        using Type = Time;
+        using FStd = FSTD_Time;
+        constexpr Time() noexcept = default;
+        constexpr Time(const FStd &other) noexcept : FStd(other) {};
+        constexpr Time(const Time &other) noexcept = default;
+        constexpr Time(Time &&other) noexcept = default;
+        constexpr Time &operator=(const Time &other) noexcept = default;
+        constexpr Time &operator=(Time &&other) noexcept = default;
+        Time operator+(Duration other) const noexcept { return this->addSat(other); }
+        Time &operator+=(Duration other) noexcept {
+            *this = this->addSat(other);
+            return *this;
+        }
+        Time operator-(Duration other) const noexcept { return this->subSat(other); }
+        Time &operator-=(Duration other) noexcept {
+            *this = this->subSat(other);
+            return *this;
+        }
+        friend constexpr std::strong_ordering operator<=>(Time lhs, Time rhs) {
+            if (lhs.secs < rhs.secs)
+                return std::strong_ordering::less;
+            if (lhs.secs > rhs.secs)
+                return std::strong_ordering::greater;
+            if (lhs.nanos < rhs.nanos)
+                return std::strong_ordering::less;
+            if (lhs.nanos > rhs.nanos)
+                return std::strong_ordering::greater;
+            return std::strong_ordering::equivalent;
+        }
+
+        static Time now() noexcept { return {fstd_time_now()}; }
+        static std::expected<Duration, Result> elapsed(Time from) noexcept {
             Duration elapsed{};
             Result result = fstd_time_elapsed(&elapsed, from);
-            if (result.is_err())
-                return std::unexpected(std::move(result));
+            if (result.isErr())
+                return std::unexpected(result);
             return elapsed;
         }
-
-        inline auto duration_since(Time since) const noexcept -> std::expected<Duration, Result> {
+        std::expected<Duration, Result> durationSince(Time since) const noexcept {
             Duration elapsed{};
             Result result = fstd_time_duration_since(&elapsed, since, *this);
-            if (result.is_err())
-                return std::unexpected(std::move(result));
+            if (result.isErr())
+                return std::unexpected(result);
             return elapsed;
         }
 
-        inline auto add(Duration rhs) const noexcept -> std::expected<Time, Result> {
+        std::expected<Time, Result> add(Duration rhs) const noexcept {
             Time time{};
             Result result = fstd_time_add(&time, *this, rhs);
-            if (result.is_err())
-                return std::unexpected(std::move(result));
+            if (result.isErr())
+                return std::unexpected(result);
             return time;
         }
-        inline auto add_sat(Duration rhs) const noexcept -> Time { return {fstd_time_add_saturating(*this, rhs)}; }
+        Time addSat(Duration rhs) const noexcept { return {fstd_time_add_saturating(*this, rhs)}; }
 
-        inline auto sub(Duration rhs) const noexcept -> std::expected<Time, Result> {
+        std::expected<Time, Result> sub(Duration rhs) const noexcept {
             Time time{};
             Result result = fstd_time_sub(&time, *this, rhs);
-            if (result.is_err())
-                return std::unexpected(std::move(result));
+            if (result.isErr())
+                return std::unexpected(result);
             return time;
         }
-        inline auto sub_sat(Duration rhs) const noexcept -> Time { return {fstd_time_sub_saturating(*this, rhs)}; }
-
-        inline auto operator+(Duration other) const noexcept -> Time { return this->add_sat(other); }
-        inline auto operator+=(Duration other) noexcept -> Time & {
-            *this = this->add_sat(other);
-            return *this;
-        }
-
-        inline auto operator-(Duration other) const noexcept -> Time { return this->sub_sat(other); }
-        inline auto operator-=(Duration other) noexcept -> Time & {
-            *this = this->sub_sat(other);
-            return *this;
-        }
-
-        inline friend constexpr std::strong_ordering operator<=>(Time lhs, Time rhs) {
-            if (lhs.secs < rhs.secs)
-                return std::strong_ordering::less;
-            if (lhs.secs > rhs.secs)
-                return std::strong_ordering::greater;
-            if (lhs.nanos < rhs.nanos)
-                return std::strong_ordering::less;
-            if (lhs.nanos > rhs.nanos)
-                return std::strong_ordering::greater;
-            return std::strong_ordering::equivalent;
-        }
+        Time subSat(Duration rhs) const noexcept { return {fstd_time_sub_saturating(*this, rhs)}; }
     };
-    inline static constexpr Time TimeEpoch = {};
-    inline static constexpr Time TimeZero = {};
-    inline static constexpr Time TimeMax = {FSTD_TIME_MAX};
+    static constexpr Time TimeEpoch = {};
+    static constexpr Time TimeZero = {};
+    static constexpr Time TimeMax = {FSTD_TIME_MAX};
 
     struct Instant : FSTD_Instant {
-        static inline auto now() noexcept -> Instant { return {fstd_instant_now()}; }
-        static inline auto elapsed(Instant from) noexcept -> std::expected<Duration, Result> {
-            Duration elapsed{};
-            Result result = fstd_instant_elapsed(&elapsed, from);
-            if (result.is_err())
-                return std::unexpected(std::move(result));
-            return elapsed;
-        }
-
-        inline auto duration_since(Instant since) const noexcept -> std::expected<Duration, Result> {
-            Duration elapsed{};
-            Result result = fstd_instant_duration_since(&elapsed, since, *this);
-            if (result.is_err())
-                return std::unexpected(std::move(result));
-            return elapsed;
-        }
-
-        inline auto add(Duration rhs) const noexcept -> std::expected<Instant, Result> {
-            Instant time{};
-            Result result = fstd_instant_add(&time, *this, rhs);
-            if (result.is_err())
-                return std::unexpected(std::move(result));
-            return time;
-        }
-        inline auto add_sat(Duration rhs) const noexcept -> Instant {
-            return {fstd_instant_add_saturating(*this, rhs)};
-        }
-
-        inline auto sub(Duration rhs) const noexcept -> std::expected<Instant, Result> {
-            Instant time{};
-            Result result = fstd_instant_sub(&time, *this, rhs);
-            if (result.is_err())
-                return std::unexpected(std::move(result));
-            return time;
-        }
-        inline auto sub_sat(Duration rhs) const noexcept -> Instant {
-            return {fstd_instant_sub_saturating(*this, rhs)};
-        }
-
-        inline auto operator+(Duration other) const noexcept -> Instant { return this->add_sat(other); }
-        inline auto operator+=(Duration other) noexcept -> Instant & {
-            *this = this->add_sat(other);
+        using Type = Instant;
+        using FStd = FSTD_Instant;
+        constexpr Instant() noexcept = default;
+        constexpr Instant(const FStd &other) noexcept : FStd(other) {};
+        constexpr Instant(const Instant &other) noexcept = default;
+        constexpr Instant(Instant &&other) noexcept = default;
+        constexpr Instant &operator=(const Instant &other) noexcept = default;
+        constexpr Instant &operator=(Instant &&other) noexcept = default;
+        Instant operator+(Duration other) const noexcept { return this->addSat(other); }
+        Instant &operator+=(Duration other) noexcept {
+            *this = this->addSat(other);
             return *this;
         }
-
-        inline auto operator-(Duration other) const noexcept -> Instant { return this->sub_sat(other); }
-        inline auto operator-=(Duration other) noexcept -> Instant & {
+        Instant operator-(Duration other) const noexcept { return this->sub_sat(other); }
+        Instant &operator-=(Duration other) noexcept {
             *this = this->sub_sat(other);
             return *this;
         }
-
-        inline friend constexpr std::strong_ordering operator<=>(Instant lhs, Instant rhs) {
+        friend constexpr std::strong_ordering operator<=>(Instant lhs, Instant rhs) {
             if (lhs.secs < rhs.secs)
                 return std::strong_ordering::less;
             if (lhs.secs > rhs.secs)
@@ -4259,9 +4275,1100 @@ namespace fstd {
                 return std::strong_ordering::greater;
             return std::strong_ordering::equivalent;
         }
+
+        static Instant now() noexcept { return {fstd_instant_now()}; }
+        static std::expected<Duration, Result> elapsed(Instant from) noexcept {
+            Duration elapsed{};
+            Result result = fstd_instant_elapsed(&elapsed, from);
+            if (result.isErr())
+                return std::unexpected(result);
+            return elapsed;
+        }
+        std::expected<Duration, Result> durationSince(Instant since) const noexcept {
+            Duration elapsed{};
+            Result result = fstd_instant_duration_since(&elapsed, since, *this);
+            if (result.isErr())
+                return std::unexpected(result);
+            return elapsed;
+        }
+
+        std::expected<Instant, Result> add(Duration rhs) const noexcept {
+            Instant time{};
+            Result result = fstd_instant_add(&time, *this, rhs);
+            if (result.isErr())
+                return std::unexpected(result);
+            return time;
+        }
+        Instant addSat(Duration rhs) const noexcept { return {fstd_instant_add_saturating(*this, rhs)}; }
+
+        std::expected<Instant, Result> sub(Duration rhs) const noexcept {
+            Instant time{};
+            Result result = fstd_instant_sub(&time, *this, rhs);
+            if (result.isErr())
+                return std::unexpected(result);
+            return time;
+        }
+        Instant sub_sat(Duration rhs) const noexcept { return {fstd_instant_sub_saturating(*this, rhs)}; }
     };
-    inline static constexpr Instant InstantZero = {};
-    inline static constexpr Instant InstantMax = {FSTD_INSTANT_MAX};
+    static constexpr Instant InstantZero = {};
+    static constexpr Instant InstantMax = {FSTD_INSTANT_MAX};
+
+    // -----------------------------------------
+    // paths -----------------------------------
+    // -----------------------------------------
+
+    struct Path;
+
+    struct PathBuf : FSTD_PathBuf {
+        using Type = PathBuf;
+        using FStd = FSTD_PathBuf;
+        constexpr PathBuf() noexcept = default;
+        constexpr PathBuf(const FStd &other) noexcept : FStd(other) {};
+        constexpr PathBuf(const PathBuf &other) noexcept = default;
+        constexpr PathBuf(PathBuf &&other) noexcept = default;
+        constexpr PathBuf &operator=(const PathBuf &other) noexcept = default;
+        constexpr PathBuf &operator=(PathBuf &&other) noexcept = default;
+        constexpr operator Path() const noexcept;
+
+        static std::expected<PathBuf, Result> init(const Allocator &alloc, usize capacity) noexcept {
+            PathBuf buf{};
+            Result status = fstd_path_buf_init_capacity(&buf, alloc, capacity);
+            if (status.isErr())
+                return std::unexpected(status);
+            return buf;
+        }
+        void deinit(const Allocator &alloc) noexcept {
+            if (this->ptr)
+                fstd_path_buf_deinit(this, alloc);
+        }
+
+        Result push(Path path) noexcept;
+        Result push(Slice<const char> path) noexcept;
+        Result push(const Allocator &alloc, Path path) noexcept;
+        Result push(const Allocator &alloc, Slice<const char> path) noexcept;
+
+        bool pop() noexcept { return fstd_path_buf_pop(this); }
+
+        constexpr Path asPath() const noexcept;
+    };
+
+    struct OwnedPath : FSTD_OwnedPath {
+        using Type = OwnedPath;
+        using FStd = FSTD_OwnedPath;
+        constexpr OwnedPath() noexcept = default;
+        constexpr OwnedPath(const FStd &other) noexcept : FStd(other) {};
+        constexpr OwnedPath(const OwnedPath &other) noexcept = default;
+        constexpr OwnedPath(OwnedPath &&other) noexcept = default;
+        constexpr OwnedPath &operator=(const OwnedPath &other) noexcept = default;
+        constexpr OwnedPath &operator=(OwnedPath &&other) noexcept = default;
+    };
+
+    struct Path : FSTD_Path {
+        using Type = Path;
+        using FStd = FSTD_Path;
+        constexpr Path() noexcept = default;
+        constexpr Path(const FStd &other) noexcept : FStd(other) {};
+        constexpr Path(const Path &other) noexcept = default;
+        constexpr Path(Path &&other) noexcept = default;
+        constexpr Path &operator=(const Path &other) noexcept = default;
+        constexpr Path &operator=(Path &&other) noexcept = default;
+
+        static std::expected<Path, Result> init(Slice<const char> path) noexcept {
+            Path p{};
+            Result status = fstd_path_init(&p, path);
+            if (status.isErr())
+                return std::unexpected(status);
+            return p;
+        }
+
+        bool isAbsolute() const noexcept { return fstd_path_is_absolute(*this); }
+        bool isRelative() const noexcept { return fstd_path_is_relative(*this); }
+        bool hasRoot() const noexcept { return fstd_path_has_root(*this); }
+
+        std::optional<Path> parent() const noexcept {
+            Path parent{};
+            bool has_parent = fstd_path_parent(*this, &parent);
+            if (!has_parent)
+                return std::nullopt;
+            return parent;
+        }
+        std::optional<Path> fileName() const noexcept {
+            Path file_name{};
+            bool has_file_name = fstd_path_file_name(*this, &file_name);
+            if (!has_file_name)
+                return std::nullopt;
+            return file_name;
+        }
+    };
+
+    using OsPathChar = FSTD_OsPathChar;
+
+    struct OwnedOsPath : Slice<OsPathChar> {
+        using Type = OwnedOsPath;
+        using FStd = FSTD_OwnedOsPath;
+        constexpr OwnedOsPath() noexcept = default;
+        constexpr OwnedOsPath(const FStd &other) noexcept : Slice{other.ptr, other.len} {};
+        constexpr OwnedOsPath(const Slice<OsPathChar> &other) noexcept : Slice{other} {};
+        constexpr OwnedOsPath(const OwnedOsPath &other) noexcept = default;
+        constexpr OwnedOsPath(OwnedOsPath &&other) noexcept = default;
+        constexpr OwnedOsPath &operator=(const OwnedOsPath &other) noexcept = default;
+        constexpr OwnedOsPath &operator=(OwnedOsPath &&other) noexcept = default;
+    };
+
+    struct OsPath : Slice<const FSTD_OsPathChar> {
+        using Type = OsPath;
+        using FStd = FSTD_OsPath;
+        constexpr OsPath() noexcept = default;
+        constexpr OsPath(const FStd &other) noexcept : Slice{other.ptr, other.len} {};
+        constexpr OsPath(const Slice<const FSTD_OsPathChar> &other) noexcept : Slice{other} {};
+        constexpr OsPath(const OsPath &other) noexcept = default;
+        constexpr OsPath(OsPath &&other) noexcept = default;
+        constexpr OsPath &operator=(const OsPath &other) noexcept = default;
+        constexpr OsPath &operator=(OsPath &&other) noexcept = default;
+    };
+
+    // NOLINTNEXTLINE(performance-enum-size)
+    enum class Win32PathPrefixTag : FSTD_Win32PathPrefixTag {
+        Verbatim = FSTD_Win32PathPrefixTag_Verbatim,
+        VerbatimUnc = FSTD_Win32PathPrefixTag_VerbatimUnc,
+        VerbatimDisk = FSTD_Win32PathPrefixTag_VerbatimDisk,
+        DeviceNs = FSTD_Win32PathPrefixTag_DeviceNs,
+        Unc = FSTD_Win32PathPrefixTag_Unc,
+        Disk = FSTD_Win32PathPrefixTag_Disk,
+    };
+
+    struct Win32PathPrefix : FSTD_Win32PathPrefix {
+        using Type = Win32PathPrefix;
+        using FStd = FSTD_Win32PathPrefix;
+        constexpr Win32PathPrefix() noexcept = default;
+        constexpr Win32PathPrefix(const FStd &other) noexcept : FStd(other) {};
+        constexpr Win32PathPrefix(const Win32PathPrefix &other) noexcept = default;
+        constexpr Win32PathPrefix(Win32PathPrefix &&other) noexcept = default;
+        constexpr Win32PathPrefix &operator=(const Win32PathPrefix &other) noexcept = default;
+        constexpr Win32PathPrefix &operator=(Win32PathPrefix &&other) noexcept = default;
+    };
+
+    // NOLINTNEXTLINE(performance-enum-size)
+    enum class PathComponentTag : FSTD_PathComponentTag {
+        Win32Prefix = FSTD_PathComponentTag_Win32Prefix,
+        RootDir = FSTD_PathComponentTag_RootDir,
+        CurDir = FSTD_PathComponentTag_CurDir,
+        ParentDir = FSTD_PathComponentTag_ParentDir,
+        Normal = FSTD_PathComponentTag_Normal,
+    };
+
+    struct PathComponent : FSTD_PathComponent {
+        using Type = PathComponent;
+        using FStd = FSTD_PathComponent;
+        constexpr PathComponent() noexcept = default;
+        constexpr PathComponent(const FStd &other) noexcept : FStd(other) {};
+        constexpr PathComponent(const PathComponent &other) noexcept = default;
+        constexpr PathComponent(PathComponent &&other) noexcept = default;
+        constexpr PathComponent &operator=(const PathComponent &other) noexcept = default;
+        constexpr PathComponent &operator=(PathComponent &&other) noexcept = default;
+    };
+
+    struct PathIter : FSTD_PathIter {
+        using Type = PathIter;
+        using FStd = FSTD_PathIter;
+        constexpr PathIter() noexcept = default;
+        constexpr PathIter(const FStd &other) noexcept : FStd(other) {};
+        constexpr PathIter(const PathIter &other) noexcept = default;
+        constexpr PathIter(PathIter &&other) noexcept = default;
+        constexpr PathIter &operator=(const PathIter &other) noexcept = default;
+        constexpr PathIter &operator=(PathIter &&other) noexcept = default;
+    };
+
+    inline constexpr PathBuf::operator Path() const noexcept { return this->asPath(); }
+    inline constexpr Path PathBuf::asPath() const noexcept { return {{this->ptr, this->len}}; }
+
+    inline Result PathBuf::push(Path path) noexcept { return fstd_path_buf_push(this, path); }
+    inline Result PathBuf::push(Slice<const char> path) noexcept { return fstd_path_buf_push_str(this, path); }
+    inline Result PathBuf::push(const Allocator &alloc, Path path) noexcept {
+        return fstd_path_buf_push_alloc(this, alloc, path);
+    }
+    inline Result PathBuf::push(const Allocator &alloc, Slice<const char> path) noexcept {
+        return fstd_path_buf_push_str_alloc(this, alloc, path);
+    }
+
+    // -----------------------------------------
+    // context api -----------------------------
+    // -----------------------------------------
+
+    constexpr Version CtxVersion = {FSTD_CTX_VERSION};
+
+    // NOLINTNEXTLINE(performance-enum-size)
+    enum class CfgId : FSTD_CfgId {
+        Core = FSTD_CfgId_Core,
+        Tracing = FSTD_CfgId_Tracing,
+        Modules = FSTD_CfgId_Modules,
+    };
+
+    using Cfg = FSTD_Cfg;
+
+    struct Ctx {
+        using Type = Ctx;
+        using FStd = FSTD_Ctx *;
+        constexpr Ctx() noexcept = default;
+        constexpr Ctx(const FStd &other) noexcept : handle(other) {};
+        constexpr Ctx(const Ctx &other) noexcept = default;
+        constexpr Ctx(Ctx &&other) noexcept = default;
+        constexpr Ctx &operator=(const Ctx &other) noexcept = default;
+        constexpr Ctx &operator=(Ctx &&other) noexcept = default;
+        constexpr operator FSTD_Ctx *() const noexcept { return this->handle; };
+
+        FSTD_Ctx *handle;
+
+        static Ctx get() noexcept { return fstd_ctx_get(); }
+        static void bind(Ctx ctx) noexcept { return fstd_ctx_register(ctx); }
+        static void unbind() noexcept { return fstd_ctx_unregister(); }
+
+        static std::expected<Ctx, Result> init(Slice<const Cfg *> cfgs) noexcept {
+            Ctx ctx{};
+            Result status = fstd_ctx_init(&ctx.handle, cfgs);
+            if (status.isErr())
+                return std::unexpected(status);
+            return ctx;
+        }
+        static void deinit() noexcept { return fstd_ctx_deinit(); }
+        static Version getVersion() noexcept { return fstd_ctx_get_version(); }
+        static Arena &getGlobalArena() noexcept { return *static_cast<Arena *>(fstd_ctx_get_global_arena()); }
+        static Arena &getScratchArena(Arena *conflict) noexcept {
+            return *static_cast<Arena *>(fstd_ctx_get_scratch_arena(conflict));
+        }
+        static bool hasErrorResult() noexcept { return fstd_ctx_has_error_result(); }
+        static Result hasErrorResult(Result new_result) noexcept { return fstd_ctx_replace_result(new_result); }
+        static Result takeResult() noexcept { return fstd_ctx_take_result(); }
+        static void clearResult() noexcept { return fstd_ctx_clear_result(); }
+        static void setResult(Result new_result) noexcept { return fstd_ctx_set_result(new_result); }
+    };
+
+    // -----------------------------------------
+    // async subsystem -------------------------
+    // -----------------------------------------
+
+    struct TaskWaker : FSTD_TaskWaker {
+        using Type = TaskWaker;
+        using FStd = FSTD_TaskWaker;
+        constexpr TaskWaker() noexcept = default;
+        constexpr TaskWaker(const FStd &other) noexcept : FStd(other) {};
+        constexpr TaskWaker(const TaskWaker &other) noexcept = default;
+        constexpr TaskWaker(TaskWaker &&other) noexcept = default;
+        constexpr TaskWaker &operator=(const TaskWaker &other) noexcept = default;
+        constexpr TaskWaker &operator=(TaskWaker &&other) noexcept = default;
+
+        TaskWaker ref() const noexcept { return fstd_task_waker_ref(*this); }
+        void unref() const noexcept { return fstd_task_waker_unref(*this); }
+        void wakeUnref() const noexcept { return fstd_task_waker_wake_unref(*this); }
+        void wake() const noexcept { return fstd_task_waker_wake(*this); }
+    };
+
+    struct PollPendingType {};
+    static constexpr PollPendingType PollPending{};
+
+    template<typename T>
+    using PollResult = std::variant<T, PollPendingType>;
+
+    template<typename T>
+    concept Awaitable = requires(T a, const TaskWaker &waker) {
+        typename T::Result;
+        { a.poll(waker) } -> std::same_as<PollResult<typename T::Result>>;
+    };
+
+    struct TaskWaiter : FSTD_TaskWaiter {
+        using Type = TaskWaiter;
+        using FStd = FSTD_TaskWaiter;
+        constexpr TaskWaiter() noexcept = default;
+        constexpr TaskWaiter(const FStd &other) noexcept : FStd(other) {};
+        constexpr TaskWaiter(const TaskWaiter &other) noexcept = default;
+        constexpr TaskWaiter(TaskWaiter &&other) noexcept = default;
+        constexpr TaskWaiter &operator=(const TaskWaiter &other) noexcept = default;
+        constexpr TaskWaiter &operator=(TaskWaiter &&other) noexcept = default;
+
+        static std::expected<TaskWaiter, Status> init() noexcept {
+            TaskWaiter waiter{};
+            auto status = static_cast<Status>(fstd_waiter_init(&waiter));
+            if (status != Status::Ok)
+                return std::unexpected(status);
+            return waiter;
+        }
+        void deinit() const noexcept { return fstd_waiter_deinit(*this); }
+        TaskWaker waker() const noexcept { return fstd_waiter_waker(*this); }
+        void block() const noexcept { return fstd_waiter_block(*this); }
+        auto await(Awaitable auto &fut) const noexcept -> typename decltype(fut)::Result {
+            TaskWaker waker = this->waker();
+            for (;;) {
+                auto status = fut.poll(waker);
+                if (status.index != 0) {
+                    this->block();
+                }
+                else {
+                    return std::get<0>(status);
+                }
+            }
+        }
+    };
+
+    template<typename T>
+    struct OpaqueFuture {
+        using Result = T;
+
+        void *data;
+        bool (*poll_fn)(void *FSTD_MAYBE_NULL data, FSTD_TaskWaker waker, T *result);
+        void (*FSTD_MAYBE_NULL deinit_fn)(void *FSTD_MAYBE_NULL data);
+
+        void deinit() const noexcept {
+            if (this->deinit_fn)
+                this->deinit_fn(this->data);
+        }
+        PollResult<T> poll() const noexcept {
+            T result;
+            bool completed = this->poll_fn(this->data);
+            if (!completed)
+                return PollResult<T>{std::in_place_index<1>};
+            return PollResult<T>{std::in_place_index<0>, std::move(result)};
+        }
+    };
+
+    struct Tasks {
+        template<Awaitable T>
+        static std::expected<OpaqueFuture<T>, Status> enqueueFuture(T fut) noexcept {
+            constexpr static usize fut_size = sizeof(T);
+            constexpr static usize fut_align = alignof(T);
+            constexpr static usize result_size = sizeof(typename T::Result);
+            constexpr static usize result_align = alignof(typename T::Result);
+            constexpr static FSTD_TaskWaiterPollFn poll_fn =
+                    +[](void *FSTD_MAYBE_NULL ptr, FSTD_TaskWaker w, void *res) {
+                        T &fut = *static_cast<T *>(ptr);
+                        typename T::Result *result = static_cast<T::Result *>(res);
+                        TaskWaker waker = w;
+                        auto status = fut.poll(waker);
+                        if (status.index != 0)
+                            return false;
+                        std::construct_at(result, std::get<0>(status));
+                        return true;
+                    };
+            constexpr static FSTD_TaskDeinitFn deinit_fut = +[](void *FSTD_MAYBE_NULL ptr) {
+                T *fut = static_cast<T *>(ptr);
+                std::destroy_at(fut);
+            };
+            constexpr static FSTD_TaskDeinitFn deinit_result = +[](void *FSTD_MAYBE_NULL ptr) {
+                typename T::Result *result = static_cast<T::Result *>(ptr);
+                std::destroy_at(result);
+            };
+
+            alignas(T) unsigned char buffer[sizeof(T)];
+            auto ptr = std::construct_at(reinterpret_cast<T *>(buffer), std::move(fut));
+
+            OpaqueFuture<T> enqueued;
+            Status status = static_cast<Status>(
+                    fstd_future_enqueue(ptr, fut_size, fut_align, result_size, result_align, poll_fn, deinit_fut,
+                                        deinit_result, reinterpret_cast<FSTD_EnqueuedFuture *>(&enqueued)));
+            if (status != Status::Ok) {
+                std::destroy_at(ptr);
+                return std::unexpected(status);
+            }
+            return enqueued;
+        }
+    };
+
+    // -----------------------------------------
+    // tracing subsystem -----------------------
+    // -----------------------------------------
+
+    // NOLINTNEXTLINE(performance-enum-size)
+    enum class TracingLevel : FSTD_TracingLevel {
+        Off = FSTD_TracingLevel_Off,
+        Error = FSTD_TracingLevel_Error,
+        Warn = FSTD_TracingLevel_Warn,
+        Info = FSTD_TracingLevel_Info,
+        Debug = FSTD_TracingLevel_Debug,
+        Trace = FSTD_TracingLevel_Trace,
+    };
+    constexpr static TracingLevel TracingDefaultLevel = static_cast<TracingLevel>(FSTD_TRACING_DEFAULT_LEVEL);
+    constexpr static TracingLevel TracingMaxLevel = static_cast<TracingLevel>(FSTD_TRACING_MAX_LEVEL);
+
+    struct Subscriber : FSTD_Subscriber {
+        using Type = Subscriber;
+        using FStd = FSTD_Subscriber;
+        constexpr Subscriber() noexcept = default;
+        constexpr Subscriber(const FStd &other) noexcept : FStd(other) {};
+        constexpr Subscriber(const Subscriber &other) noexcept = default;
+        constexpr Subscriber(Subscriber &&other) noexcept = default;
+        constexpr Subscriber &operator=(const Subscriber &other) noexcept = default;
+        constexpr Subscriber &operator=(Subscriber &&other) noexcept = default;
+
+        using EventTag = FSTD_TracingEventTag;
+        using Start = FSTD_TracingEventStart;
+        using Finish = FSTD_TracingEventFinish;
+        using RegisterThread = FSTD_TracingEventRegisterThread;
+        using UnregisterThread = FSTD_TracingEventUnregisterThread;
+        using CreateCallStack = FSTD_TracingEventCreateCallStack;
+        using DestroyCallStack = FSTD_TracingEventDestroyCallStack;
+        using UnblockCallStack = FSTD_TracingEventUnblockCallStack;
+        using SuspendCallStack = FSTD_TracingEventSuspendCallStack;
+        using ResumeCallStack = FSTD_TracingEventResumeCallStack;
+        using EnterSpan = FSTD_TracingEventEnterSpan;
+        using ExitSpan = FSTD_TracingEventExitSpan;
+        using LogMessage = FSTD_TracingEventLogMessage;
+        using DeclareEventInfo = FSTD_TracingEventDeclareEventInfo;
+        using StartThread = FSTD_TracingEventStartThread;
+        using StopThread = FSTD_TracingEventStopThread;
+        using LoadImage = FSTD_TracingEventLoadImage;
+        using UnloadImage = FSTD_TracingEventUnloadImage;
+        using ContextSwitch = FSTD_TracingEventContextSwitch;
+        using ThreadWakeup = FSTD_TracingEventThreadWakeup;
+        using CallStackSample = FSTD_TracingEventCallStackSample;
+
+        template<typename T>
+        static Subscriber init(T &ptr) noexcept {
+            constexpr static auto on_event = +[](void *data, const EventTag *tag) {
+                T &sub = *static_cast<T *>(data);
+                switch (*tag) {
+                    case FSTD_TracingEventTag_Start: {
+                        if constexpr (requires { sub.onEvent(std::declval<Start>()); }) {
+                            const auto *event = fstd_parent_of_const(Start, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_Finish: {
+                        if constexpr (requires { sub.onEvent(std::declval<Finish>()); }) {
+                            const auto *event = fstd_parent_of_const(Finish, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_RegisterThread: {
+                        if constexpr (requires { sub.onEvent(std::declval<RegisterThread>()); }) {
+                            const auto *event = fstd_parent_of_const(RegisterThread, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_UnregisterThread: {
+                        if constexpr (requires { sub.onEvent(std::declval<UnregisterThread>()); }) {
+                            const auto *event = fstd_parent_of_const(UnregisterThread, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_CreateCallStack: {
+                        if constexpr (requires { sub.onEvent(std::declval<CreateCallStack>()); }) {
+                            const auto *event = fstd_parent_of_const(CreateCallStack, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_DestroyCallStack: {
+                        if constexpr (requires { sub.onEvent(std::declval<DestroyCallStack>()); }) {
+                            const auto *event = fstd_parent_of_const(DestroyCallStack, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_UnblockCallStack: {
+                        if constexpr (requires { sub.onEvent(std::declval<UnblockCallStack>()); }) {
+                            const auto *event = fstd_parent_of_const(UnblockCallStack, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_SuspendCallStack: {
+                        if constexpr (requires { sub.onEvent(std::declval<SuspendCallStack>()); }) {
+                            const auto *event = fstd_parent_of_const(SuspendCallStack, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_ResumeCallStack: {
+                        if constexpr (requires { sub.onEvent(std::declval<ResumeCallStack>()); }) {
+                            const auto *event = fstd_parent_of_const(ResumeCallStack, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_EnterSpan: {
+                        if constexpr (requires { sub.onEvent(std::declval<EnterSpan>()); }) {
+                            const auto *event = fstd_parent_of_const(EnterSpan, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_ExitSpan: {
+                        if constexpr (requires { sub.onEvent(std::declval<ExitSpan>()); }) {
+                            const auto *event = fstd_parent_of_const(ExitSpan, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_LogMessage: {
+                        if constexpr (requires { sub.onEvent(std::declval<LogMessage>()); }) {
+                            const auto *event = fstd_parent_of_const(LogMessage, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_DeclareEventInfo: {
+                        if constexpr (requires { sub.onEvent(std::declval<DeclareEventInfo>()); }) {
+                            const auto *event = fstd_parent_of_const(DeclareEventInfo, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_StartThread: {
+                        if constexpr (requires { sub.onEvent(std::declval<StartThread>()); }) {
+                            const auto *event = fstd_parent_of_const(StartThread, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_StopThread: {
+                        if constexpr (requires { sub.onEvent(std::declval<StopThread>()); }) {
+                            const auto *event = fstd_parent_of_const(StopThread, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_LoadImage: {
+                        if constexpr (requires { sub.onEvent(std::declval<LoadImage>()); }) {
+                            const auto *event = fstd_parent_of_const(LoadImage, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_UnloadImage: {
+                        if constexpr (requires { sub.onEvent(std::declval<UnloadImage>()); }) {
+                            const auto *event = fstd_parent_of_const(UnloadImage, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_ContextSwitch: {
+                        if constexpr (requires { sub.onEvent(std::declval<ContextSwitch>()); }) {
+                            const auto *event = fstd_parent_of_const(ContextSwitch, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_ThreadWakeup: {
+                        if constexpr (requires { sub.onEvent(std::declval<ThreadWakeup>()); }) {
+                            const auto *event = fstd_parent_of_const(ThreadWakeup, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    case FSTD_TracingEventTag_CallStackSample: {
+                        if constexpr (requires { sub.onEvent(std::declval<CallStackSample>()); }) {
+                            const auto *event = fstd_parent_of_const(CallStackSample, tag, &sub);
+                            sub.onEvent(*event);
+                        }
+                    } break;
+                    default:
+                        break;
+                }
+            };
+
+            return FSTD_Subscriber{
+                    .data = &ptr,
+                    .on_event = nullptr,
+            };
+        }
+
+        void start(Start ev) { fstd_subscriber_start(*this, ev); }
+        void finish(Finish ev) { fstd_subscriber_finish(*this, ev); }
+        void registerThread(RegisterThread ev) { fstd_subscriber_register_thread(*this, ev); }
+        void unregisterThread(UnregisterThread ev) { fstd_subscriber_unregister_thread(*this, ev); }
+        void createCallStack(CreateCallStack ev) { fstd_subscriber_create_call_stack(*this, ev); }
+        void destroyCallStack(DestroyCallStack ev) { fstd_subscriber_destroy_call_stack(*this, ev); }
+        void unblockCallStack(UnblockCallStack ev) { fstd_subscriber_unblock_call_stack(*this, ev); }
+        void suspendCallStack(SuspendCallStack ev) { fstd_subscriber_suspend_call_stack(*this, ev); }
+        void resumeCallStack(ResumeCallStack ev) { fstd_subscriber_resume_call_stack(*this, ev); }
+        void enterSpan(EnterSpan ev) { fstd_subscriber_enter_span(*this, ev); }
+        void exitSpan(ExitSpan ev) { fstd_subscriber_exit_span(*this, ev); }
+        void logMessage(LogMessage ev) { fstd_subscriber_log_message(*this, ev); }
+        void declareEventInfo(DeclareEventInfo ev) { fstd_subscriber_declare_event_info(*this, ev); }
+        void startThread(StartThread ev) { fstd_subscriber_start_thread(*this, ev); }
+        void stopThread(StopThread ev) { fstd_subscriber_stop_thread(*this, ev); }
+        void loadImage(LoadImage ev) { fstd_subscriber_load_image(*this, ev); }
+        void unloadImage(UnloadImage ev) { fstd_subscriber_unload_image(*this, ev); }
+        void contextSwitch(ContextSwitch ev) { fstd_subscriber_context_switch(*this, ev); }
+        void threadWakeup(ThreadWakeup ev) { fstd_subscriber_thread_wakeup(*this, ev); }
+        void callStackSample(CallStackSample ev) { fstd_subscriber_call_stack_sample(*this, ev); }
+    };
+
+    struct StdErrLogger : Subscriber {
+        static StdErrLogger init() noexcept { return {fstd_stderr_logger_init()}; }
+        void deinit() const noexcept { return fstd_stderr_logger_deinit(*this); }
+    };
+
+    struct CallStack {
+        using Type = CallStack;
+        using FStd = FSTD_CallStack *;
+        constexpr CallStack() noexcept = default;
+        constexpr CallStack(const FStd &other) noexcept : handle(other) {};
+        constexpr CallStack(const CallStack &other) noexcept = default;
+        constexpr CallStack(CallStack &&other) noexcept = default;
+        constexpr CallStack &operator=(const CallStack &other) noexcept = default;
+        constexpr CallStack &operator=(CallStack &&other) noexcept = default;
+        constexpr operator FSTD_CallStack *() const noexcept { return this->handle; };
+
+        FSTD_CallStack *handle;
+
+        static CallStack init() noexcept { return fstd_call_stack_init(); }
+        void finish() const noexcept { return fstd_call_stack_finish(this->handle); }
+        void abort() const noexcept { return fstd_call_stack_abort(this->handle); }
+        CallStack replaceCurrent() const noexcept { return fstd_call_stack_replace_current(this->handle); }
+        void unblock() const noexcept { return fstd_call_stack_unblock(this->handle); }
+        static void suspendCurrent(bool mark_blocked) noexcept { fstd_call_stack_suspend_current(mark_blocked); }
+        static void resumeCurrent() noexcept { fstd_call_stack_resume_current(); }
+    };
+
+    struct TracingCfg : FSTD_TracingCfg {
+        using Type = TracingCfg;
+        using FStd = FSTD_TracingCfg;
+        constexpr TracingCfg() noexcept :
+            FStd{
+                    .id = {.id = static_cast<FSTD_CfgId>(CfgId::Tracing)},
+                    .format_buffer_len = 0,
+                    .max_level = static_cast<FSTD_TracingLevel>(TracingMaxLevel),
+                    .subscribers = {},
+                    .register_thread = true,
+                    .app_name = {},
+            } {}
+        constexpr TracingCfg(usize format_buffer_len, TracingLevel max_level, Slice<const Subscriber> subscribers,
+                             bool register_thread, Slice<const char> app_name) noexcept :
+            FStd{
+                    .id = {.id = static_cast<FSTD_CfgId>(CfgId::Tracing)},
+                    .format_buffer_len = format_buffer_len,
+                    .max_level = static_cast<FSTD_TracingLevel>(max_level),
+                    .subscribers = subscribers,
+                    .register_thread = register_thread,
+                    .app_name = app_name,
+            } {};
+        constexpr TracingCfg(const FStd &other) noexcept : FStd(other) {};
+        constexpr TracingCfg(const TracingCfg &other) noexcept = default;
+        constexpr TracingCfg(TracingCfg &&other) noexcept = default;
+        constexpr TracingCfg &operator=(const TracingCfg &other) noexcept = default;
+        constexpr TracingCfg &operator=(TracingCfg &&other) noexcept = default;
+    };
+
+    struct Tracing {
+        static bool isEnabled() noexcept { return fstd_tracing_is_enabled(); }
+        static void registerThread() noexcept { return fstd_tracing_register_thread(); }
+        static void unregisterThread() noexcept { return fstd_tracing_unregister_thread(); }
+    };
+
+    // -----------------------------------------
+    // modules subsystem -----------------------
+    // -----------------------------------------
+
+    // NOLINTNEXTLINE(performance-enum-size)
+    enum class ModuleParamTag : FSTD_ModuleParamTag {
+        U8 = FSTD_ModuleParamTag_U8,
+        U16 = FSTD_ModuleParamTag_U16,
+        U32 = FSTD_ModuleParamTag_U32,
+        U64 = FSTD_ModuleParamTag_U64,
+        I8 = FSTD_ModuleParamTag_I8,
+        I16 = FSTD_ModuleParamTag_I16,
+        I32 = FSTD_ModuleParamTag_I32,
+        I64 = FSTD_ModuleParamTag_I64,
+    };
+
+    // NOLINTNEXTLINE(performance-enum-size)
+    enum class ModuleAccessGroup : FSTD_ModuleAccessGroup {
+        Public = FSTD_ModuleAccessGroup_Public,
+        Dependency = FSTD_ModuleAccessGroup_Dependency,
+        Private = FSTD_ModuleAccessGroup_Private,
+    };
+
+    struct ModuleParamInfo : FSTD_ModuleParamInfo {
+        using Type = ModuleParamInfo;
+        using FStd = FSTD_ModuleParamInfo;
+        constexpr ModuleParamInfo() noexcept = default;
+        constexpr ModuleParamInfo(const FStd &other) noexcept : FStd(other) {};
+        constexpr ModuleParamInfo(const ModuleParamInfo &other) noexcept = default;
+        constexpr ModuleParamInfo(ModuleParamInfo &&other) noexcept = default;
+        constexpr ModuleParamInfo &operator=(const ModuleParamInfo &other) noexcept = default;
+        constexpr ModuleParamInfo &operator=(ModuleParamInfo &&other) noexcept = default;
+    };
+
+    template<typename T>
+    struct ModuleParamUtil;
+
+    template<>
+    struct ModuleParamUtil<u8> {
+        using Param = FSTD_ModuleParamU8;
+        static constexpr ModuleParamTag ParamTag = ModuleParamTag::U8;
+        static constexpr auto read = fstd_module_param_u8_read;
+        static constexpr auto write = fstd_module_param_u8_write;
+        static constexpr auto readData = fstd_module_param_data_read_u8;
+        static constexpr auto writeData = fstd_module_param_data_write_u8;
+    };
+    template<>
+    struct ModuleParamUtil<u16> {
+        using Param = FSTD_ModuleParamU16;
+        static constexpr ModuleParamTag ParamTag = ModuleParamTag::U16;
+        static constexpr auto read = fstd_module_param_u16_read;
+        static constexpr auto write = fstd_module_param_u16_write;
+        static constexpr auto readData = fstd_module_param_data_read_u16;
+        static constexpr auto writeData = fstd_module_param_data_write_u16;
+    };
+    template<>
+    struct ModuleParamUtil<u32> {
+        using Param = FSTD_ModuleParamU32;
+        static constexpr ModuleParamTag ParamTag = ModuleParamTag::U32;
+        static constexpr auto read = fstd_module_param_u32_read;
+        static constexpr auto write = fstd_module_param_u32_write;
+        static constexpr auto readData = fstd_module_param_data_read_u32;
+        static constexpr auto writeData = fstd_module_param_data_write_u32;
+    };
+    template<>
+    struct ModuleParamUtil<u64> {
+        using Param = FSTD_ModuleParamU64;
+        static constexpr ModuleParamTag ParamTag = ModuleParamTag::U64;
+        static constexpr auto read = fstd_module_param_u64_read;
+        static constexpr auto write = fstd_module_param_u64_write;
+        static constexpr auto readData = fstd_module_param_data_read_u64;
+        static constexpr auto writeData = fstd_module_param_data_write_u64;
+    };
+    template<>
+    struct ModuleParamUtil<i8> {
+        using Param = FSTD_ModuleParamI8;
+        static constexpr ModuleParamTag ParamTag = ModuleParamTag::I8;
+        static constexpr auto read = fstd_module_param_i8_read;
+        static constexpr auto write = fstd_module_param_i8_write;
+        static constexpr auto readData = fstd_module_param_data_read_i8;
+        static constexpr auto writeData = fstd_module_param_data_write_i8;
+    };
+    template<>
+    struct ModuleParamUtil<i16> {
+        using Param = FSTD_ModuleParamI16;
+        static constexpr ModuleParamTag ParamTag = ModuleParamTag::I16;
+        static constexpr auto read = fstd_module_param_i16_read;
+        static constexpr auto write = fstd_module_param_i16_write;
+        static constexpr auto readData = fstd_module_param_data_read_i16;
+        static constexpr auto writeData = fstd_module_param_data_write_i16;
+    };
+    template<>
+    struct ModuleParamUtil<i32> {
+        using Param = FSTD_ModuleParamI32;
+        static constexpr ModuleParamTag ParamTag = ModuleParamTag::I32;
+        static constexpr auto read = fstd_module_param_i32_read;
+        static constexpr auto write = fstd_module_param_i32_write;
+        static constexpr auto readData = fstd_module_param_data_read_i32;
+        static constexpr auto writeData = fstd_module_param_data_write_i32;
+    };
+    template<>
+    struct ModuleParamUtil<i64> {
+        using Param = FSTD_ModuleParamI64;
+        static constexpr ModuleParamTag ParamTag = ModuleParamTag::I64;
+        static constexpr auto read = fstd_module_param_i64_read;
+        static constexpr auto write = fstd_module_param_i64_write;
+        static constexpr auto readData = fstd_module_param_data_read_i64;
+        static constexpr auto writeData = fstd_module_param_data_write_i64;
+    };
+
+    template<typename T>
+    struct ModuleParam {
+        using Type = ModuleParam;
+        using FStd = typename ModuleParamUtil<T>::Param *;
+        constexpr ModuleParam() noexcept = default;
+        constexpr ModuleParam(const FStd &other) noexcept : handle(other) {};
+        constexpr ModuleParam(const ModuleParam &other) noexcept = default;
+        constexpr ModuleParam(ModuleParam &&other) noexcept = default;
+        constexpr ModuleParam &operator=(const ModuleParam &other) noexcept = default;
+        constexpr ModuleParam &operator=(ModuleParam &&other) noexcept = default;
+        constexpr operator typename ModuleParamUtil<T>::Param *() const noexcept { return this->handle; };
+
+        typename ModuleParamUtil<T>::Param *handle;
+
+        ModuleParamTag tag() const noexcept { return ModuleParamUtil<T>::ParamTag; }
+        T read() const noexcept { return ModuleParam<T>::read(this->handle); }
+        void write(T value) const noexcept { return ModuleParam<T>::write(this->handle, value); }
+    };
+
+    template<>
+    struct ModuleParam<void> {
+        using Type = ModuleParam;
+        using FStd = FSTD_ModuleParam *;
+        constexpr ModuleParam() noexcept = default;
+        constexpr ModuleParam(const FStd &other) noexcept : handle(other) {};
+        constexpr ModuleParam(const ModuleParam &other) noexcept = default;
+        constexpr ModuleParam(ModuleParam &&other) noexcept = default;
+        constexpr ModuleParam &operator=(const ModuleParam &other) noexcept = default;
+        constexpr ModuleParam &operator=(ModuleParam &&other) noexcept = default;
+        constexpr operator FSTD_ModuleParam *() const noexcept { return this->handle; };
+
+        FSTD_ModuleParam *handle;
+
+        ModuleParamTag tag() const noexcept {
+            return static_cast<ModuleParamTag>(fstd_module_param_opaque_tag(this->handle));
+        }
+        template<typename T>
+        T read() const noexcept {
+            fstd_dbg_assert(this->tag() == ModuleParamUtil<T>::ParamTag);
+            ModuleParam<T> param = reinterpret_cast<typename ModuleParamUtil<T>::Param *>(this->handle);
+            return param.read();
+        }
+        template<typename T>
+        void write(T value) const noexcept {
+            fstd_dbg_assert(this->tag() == ModuleParamUtil<T>::ParamTag);
+            ModuleParam<T> param = reinterpret_cast<typename ModuleParamUtil<T>::Param *>(this->handle);
+            param.write(value);
+        }
+    };
+
+    template<typename T>
+    struct ModuleParamData : FSTD_ModuleParamData {
+        using Type = ModuleParamData;
+        using FStd = FSTD_ModuleParamData;
+        constexpr ModuleParamData() noexcept = default;
+        constexpr ModuleParamData(const FStd &other) noexcept : FStd(other) {};
+        constexpr ModuleParamData(const ModuleParamData &other) noexcept = default;
+        constexpr ModuleParamData(ModuleParamData &&other) noexcept = default;
+        constexpr ModuleParamData &operator=(const ModuleParamData &other) noexcept = default;
+        constexpr ModuleParamData &operator=(ModuleParamData &&other) noexcept = default;
+
+        ModuleParamTag tag() const noexcept { return ModuleParamUtil<T>::ParamTag; }
+        T read() const noexcept { return ModuleParam<T>::readData(*this); }
+        void write(T value) const noexcept { return ModuleParam<T>::writeData(*this, value); }
+    };
+
+    template<>
+    struct ModuleParamData<void> : FSTD_ModuleParamData {
+        using Type = ModuleParamData;
+        using FStd = FSTD_ModuleParamData;
+        constexpr ModuleParamData() noexcept = default;
+        constexpr ModuleParamData(const FStd &other) noexcept : FStd(other) {};
+        constexpr ModuleParamData(const ModuleParamData &other) noexcept = default;
+        constexpr ModuleParamData(ModuleParamData &&other) noexcept = default;
+        constexpr ModuleParamData &operator=(const ModuleParamData &other) noexcept = default;
+        constexpr ModuleParamData &operator=(ModuleParamData &&other) noexcept = default;
+
+        ModuleParamTag tag() const noexcept { return static_cast<ModuleParamTag>(fstd_module_param_data_tag(*this)); }
+        template<typename T>
+        T read() const noexcept {
+            fstd_dbg_assert(this->tag() == ModuleParamUtil<T>::ParamTag);
+            ModuleParamData<T> param = *this;
+            return param.read();
+        }
+        template<typename T>
+        void write(T value) const noexcept {
+            fstd_dbg_assert(this->tag() == ModuleParamUtil<T>::ParamTag);
+            ModuleParamData<T> param = *this;
+            param.write(value);
+        }
+    };
+
+    template<typename T>
+    struct ModuleSymbol : FSTD_ModuleSymbol {
+        using Type = ModuleSymbol;
+        using FStd = FSTD_ModuleSymbol;
+        constexpr ModuleSymbol() noexcept = default;
+        constexpr ModuleSymbol(Slice<const char> name, Version version) noexcept : ModuleSymbol(name, "", version) {};
+        constexpr ModuleSymbol(Slice<const char> name, Slice<const char> ns, Version version) noexcept :
+            FStd{.name = name, .ns = ns, .version = version} {};
+        constexpr ModuleSymbol(const FStd &other) noexcept : FStd(other) {};
+        constexpr ModuleSymbol(const ModuleSymbol &other) noexcept = default;
+        constexpr ModuleSymbol(ModuleSymbol &&other) noexcept = default;
+        constexpr ModuleSymbol &operator=(const ModuleSymbol &other) noexcept = default;
+        constexpr ModuleSymbol &operator=(ModuleSymbol &&other) noexcept = default;
+    };
+
+    struct ModuleHandle {
+        using Type = ModuleHandle;
+        using FStd = FSTD_ModuleHandle *;
+        constexpr ModuleHandle() noexcept = default;
+        constexpr ModuleHandle(const FStd &other) noexcept : handle(other) {};
+        constexpr ModuleHandle(const ModuleHandle &other) noexcept = default;
+        constexpr ModuleHandle(ModuleHandle &&other) noexcept = default;
+        constexpr ModuleHandle &operator=(const ModuleHandle &other) noexcept = default;
+        constexpr ModuleHandle &operator=(ModuleHandle &&other) noexcept = default;
+        constexpr operator FSTD_ModuleHandle *() const noexcept { return this->handle; };
+
+        FSTD_ModuleHandle *handle;
+
+        Slice<const char> name() const noexcept {
+            auto value = fstd_module_handle_name(this->handle);
+            return {value.ptr, value.len};
+        }
+        Slice<const char> description() const noexcept {
+            auto value = fstd_module_handle_description(this->handle);
+            return {value.ptr, value.len};
+        }
+        Slice<const char> license() const noexcept {
+            auto value = fstd_module_handle_license(this->handle);
+            return {value.ptr, value.len};
+        }
+        Path modulePath() const noexcept { return fstd_module_handle_module_path(this->handle); }
+        void ref() const noexcept { return fstd_module_handle_ref(this->handle); }
+        void unref() const noexcept { return fstd_module_handle_unref(this->handle); }
+        void markUnloadable() const noexcept { return fstd_module_handle_mark_unloadable(this->handle); }
+        bool isLoaded() const noexcept { return fstd_module_handle_is_loaded(this->handle); }
+        bool tryRefInstanceStrong() const noexcept { return fstd_module_handle_try_ref_instance_strong(this->handle); }
+        void unrefInstanceStrong() const noexcept { return fstd_module_handle_unref_instance_strong(this->handle); }
+        static std::expected<ModuleHandle, Status> findByName(Slice<const char> module) noexcept {
+            ModuleHandle handle{};
+            Status status = static_cast<Status>(fstd_module_handle_find_by_name(&handle.handle, module));
+            if (status != Status::Ok)
+                return std::unexpected(status);
+            return handle;
+        }
+        template<typename T>
+        static std::expected<ModuleHandle, Status> findBySymbol(ModuleSymbol<T> symbol) noexcept {
+            ModuleHandle handle{};
+            Status status = static_cast<Status>(fstd_module_handle_find_by_symbol(&handle.handle, symbol));
+            if (status != Status::Ok)
+                return std::unexpected(status);
+            return handle;
+        }
+    };
+
+    // NOLINTNEXTLINE(performance-enum-size)
+    enum class ModuleDependency : FSTD_ModuleDependency {
+        None = FSTD_ModuleDependency_None,
+        Static = FSTD_ModuleDependency_Static,
+        Dynamic = FSTD_ModuleDependency_Dynamic,
+    };
+
+    struct ModuleInstance {
+        using Type = ModuleInstance;
+        using FStd = FSTD_ModuleInstance *;
+        constexpr ModuleInstance() noexcept = default;
+        constexpr ModuleInstance(const FStd &other) noexcept : handle(other) {};
+        constexpr ModuleInstance(const ModuleInstance &other) noexcept = default;
+        constexpr ModuleInstance(ModuleInstance &&other) noexcept = default;
+        constexpr ModuleInstance &operator=(const ModuleInstance &other) noexcept = default;
+        constexpr ModuleInstance &operator=(ModuleInstance &&other) noexcept = default;
+        constexpr operator FSTD_ModuleInstance *() const noexcept { return this->handle; };
+
+        FSTD_ModuleInstance *handle;
+
+        ModuleParam<void> *const *FSTD_MAYBE_NULL parameters() const noexcept {
+            return reinterpret_cast<ModuleParam<void> *const *>(fstd_module_instance_parameters(this->handle));
+        }
+        Path const *FSTD_MAYBE_NULL resources() const noexcept {
+            return reinterpret_cast<Path const *>(fstd_module_instance_resources(this->handle));
+        }
+        const void *const *FSTD_MAYBE_NULL imports() const noexcept {
+            return fstd_module_instance_imports(this->handle);
+        }
+        const void *const *FSTD_MAYBE_NULL exports() const noexcept {
+            return fstd_module_instance_exports(this->handle);
+        }
+        ModuleHandle moduleHandle() const noexcept { return fstd_module_instance_handle(this->handle); }
+        Ctx ctxHandle() const noexcept { return fstd_module_instance_ctx_handle(this->handle); }
+        void const *FSTD_MAYBE_NULL state() const noexcept { return fstd_module_instance_state(this->handle); }
+
+        void ref() const noexcept { return fstd_module_instance_ref(this->handle); }
+        void unref() const noexcept { return fstd_module_instance_unref(this->handle); }
+        ModuleDependency queryNs(Slice<const char> ns) const noexcept {
+            return static_cast<ModuleDependency>(fstd_module_instance_query_namespace(this->handle, ns));
+        }
+        Status addNs(Slice<const char> ns) const noexcept {
+            return static_cast<Status>(fstd_module_instance_add_namespace(this->handle, ns));
+        }
+        Status removeNs(Slice<const char> ns) const noexcept {
+            return static_cast<Status>(fstd_module_instance_remove_namespace(this->handle, ns));
+        }
+        ModuleDependency queryDep(ModuleHandle handle) const noexcept {
+            return static_cast<ModuleDependency>(fstd_module_instance_query_dependency(this->handle, handle.handle));
+        }
+        Status addDep(ModuleHandle handle) const noexcept {
+            return static_cast<Status>(fstd_module_instance_add_dependency(this->handle, handle.handle));
+        }
+        Status removeDep(ModuleHandle handle) const noexcept {
+            return static_cast<Status>(fstd_module_instance_remove_dependency(this->handle, handle.handle));
+        }
+        template<typename T>
+        std::expected<T const *, Status> loadSymbol(ModuleSymbol<T> symbol) const noexcept {
+            void const *loaded;
+            Status status = static_cast<Status>(fstd_module_instance_load_symbol(this->handle, symbol, &loaded));
+            if (status != Status::Ok)
+                return std::unexpected(status);
+            return static_cast<T const *>(loaded);
+        }
+        template<typename T>
+        std::expected<T, Status> readParameter(Slice<const char> module, Slice<const char> parameter) const noexcept {
+            T value;
+            ModuleParamTag tag = ModuleParamUtil<T>::ParamTag;
+            Status status = static_cast<Status>(
+                    fstd_module_instance_read_parameter_opaque(this->handle, tag, module, parameter, &value));
+            if (status != Status::Ok)
+                return std::unexpected(status);
+            return value;
+        }
+        template<typename T>
+        Status writeParameter(Slice<const char> module, Slice<const char> parameter, const T value) const noexcept {
+            ModuleParamTag tag = ModuleParamUtil<T>::ParamTag;
+            Status status = static_cast<Status>(
+                    fstd_module_instance_write_parameter_opaque(this->handle, tag, module, parameter, &value));
+            return status;
+        }
+    };
+
+    struct ModuleRootInstance {
+        using Type = ModuleRootInstance;
+        using FStd = FSTD_ModuleRootInstance *;
+        constexpr ModuleRootInstance() noexcept = default;
+        constexpr ModuleRootInstance(const FStd &other) noexcept : handle(other) {};
+        constexpr ModuleRootInstance(const ModuleRootInstance &other) noexcept = default;
+        constexpr ModuleRootInstance(ModuleRootInstance &&other) noexcept = default;
+        constexpr ModuleRootInstance &operator=(const ModuleRootInstance &other) noexcept = default;
+        constexpr ModuleRootInstance &operator=(ModuleRootInstance &&other) noexcept = default;
+        constexpr operator FSTD_ModuleRootInstance *() const noexcept { return this->handle; };
+
+        FSTD_ModuleRootInstance *handle;
+
+        static std::expected<ModuleRootInstance, Status> init() noexcept {
+            ModuleRootInstance inst{};
+            Status status = static_cast<Status>(fstd_module_root_instance_init(&inst.handle));
+            if (status != Status::Ok)
+                return std::unexpected(status);
+            return inst;
+        }
+        void deinit() const noexcept { return fstd_module_root_instance_deinit(this->handle); }
+        ModuleDependency queryNs(Slice<const char> ns) const noexcept {
+            return static_cast<ModuleDependency>(fstd_module_root_instance_query_namespace(this->handle, ns));
+        }
+        Status addNs(Slice<const char> ns) const noexcept {
+            return static_cast<Status>(fstd_module_root_instance_add_namespace(this->handle, ns));
+        }
+        Status removeNs(Slice<const char> ns) const noexcept {
+            return static_cast<Status>(fstd_module_root_instance_remove_namespace(this->handle, ns));
+        }
+        ModuleDependency queryDep(ModuleHandle handle) const noexcept {
+            return static_cast<ModuleDependency>(
+                    fstd_module_root_instance_query_dependency(this->handle, handle.handle));
+        }
+        Status addDep(ModuleHandle handle) const noexcept {
+            return static_cast<Status>(fstd_module_root_instance_add_dependency(this->handle, handle.handle));
+        }
+        Status removeDep(ModuleHandle handle) const noexcept {
+            return static_cast<Status>(fstd_module_root_instance_remove_dependency(this->handle, handle.handle));
+        }
+        template<typename T>
+        std::expected<T const *, Status> loadSymbol(ModuleSymbol<T> symbol) const noexcept {
+            void const *loaded;
+            Status status = static_cast<Status>(fstd_module_root_instance_load_symbol(this->handle, symbol, &loaded));
+            if (status != Status::Ok)
+                return std::unexpected(status);
+            return static_cast<T const *>(loaded);
+        }
+        template<typename T>
+        std::expected<T, Status> readParameter(Slice<const char> module, Slice<const char> parameter) const noexcept {
+            T value;
+            ModuleParamTag tag = ModuleParamUtil<T>::ParamTag;
+            Status status = static_cast<Status>(
+                    fstd_module_root_instance_read_parameter_opaque(this->handle, tag, module, parameter, &value));
+            if (status != Status::Ok)
+                return std::unexpected(status);
+            return value;
+        }
+        template<typename T>
+        Status writeParameter(Slice<const char> module, Slice<const char> parameter, const T value) const noexcept {
+            ModuleParamTag tag = ModuleParamUtil<T>::ParamTag;
+            Status status = static_cast<Status>(
+                    fstd_module_root_instance_write_parameter_opaque(this->handle, tag, module, parameter, &value));
+            return status;
+        }
+    };
+
+    struct ModuleLoader {
+        using Type = ModuleLoader;
+        using FStd = FSTD_ModuleLoader *;
+        constexpr ModuleLoader() noexcept = default;
+        constexpr ModuleLoader(const FStd &other) noexcept : handle(other) {};
+        constexpr ModuleLoader(const ModuleLoader &other) noexcept = default;
+        constexpr ModuleLoader(ModuleLoader &&other) noexcept = default;
+        constexpr ModuleLoader &operator=(const ModuleLoader &other) noexcept = default;
+        constexpr ModuleLoader &operator=(ModuleLoader &&other) noexcept = default;
+        constexpr operator FSTD_ModuleLoader *() const noexcept { return this->handle; };
+
+        FSTD_ModuleLoader *handle;
+    };
 
 } // namespace fstd
 #endif
@@ -4386,9 +5493,9 @@ fstd_func_impl void fstd_call_stack_resume_current(void) {
     handle->tracing_v0.resume_current_call_stack();
 }
 
-fstd_func_impl void fstd_tracing_is_enabled(void) {
+fstd_func_impl bool fstd_tracing_is_enabled(void) {
     FSTD_Ctx *handle = fstd_ctx_get();
-    handle->tracing_v0.is_enabled();
+    return handle->tracing_v0.is_enabled();
 }
 
 fstd_func_impl void fstd_tracing_register_thread(void) {
