@@ -3763,6 +3763,7 @@ struct FSTD_Ctx {
 #ifdef __cplusplus
 #include <array>
 #include <atomic>
+#include <bit>
 #include <compare>
 #include <concepts>
 #include <expected>
@@ -4060,6 +4061,12 @@ namespace fstd {
 
         template<typename T>
         static Result init(T) noexcept;
+        static Result initPlatformError(FSTD_PlatformError err) noexcept {
+            return fstd_result_init_platform_error(err);
+        }
+        static Result initPlatformError(PlatformError err) noexcept {
+            return initPlatformError(static_cast<FSTD_PlatformError>(err));
+        }
         void deinit() noexcept {
             if (this->vtable)
                 fstd_result_deinit(*this);
@@ -4072,12 +4079,8 @@ namespace fstd {
     };
 
     template<>
-    inline Result Result::init(FSTD_PlatformError err) noexcept {
-        return fstd_result_init_platform_error(static_cast<FSTD_PlatformError>(err));
-    }
-    template<>
     inline Result Result::init(PlatformError err) noexcept {
-        return Result::init(static_cast<FSTD_PlatformError>(err));
+        return initPlatformError(err);
     }
 
     // -----------------------------------------
@@ -4571,8 +4574,8 @@ namespace fstd {
 
     template<typename T>
     concept Awaitable = requires(T a, const TaskWaker &waker) {
-        typename T::Result;
-        { a.poll(waker) } -> std::same_as<PollResult<typename T::Result>>;
+        typename T::ResultType;
+        { a.poll(waker) } -> std::same_as<PollResult<typename T::ResultType>>;
     };
 
     struct TaskWaiter : FSTD_TaskWaiter {
@@ -4595,11 +4598,11 @@ namespace fstd {
         void deinit() const noexcept { return fstd_waiter_deinit(*this); }
         TaskWaker waker() const noexcept { return fstd_waiter_waker(*this); }
         void block() const noexcept { return fstd_waiter_block(*this); }
-        auto await(Awaitable auto &fut) const noexcept -> typename decltype(fut)::Result {
+        auto await(Awaitable auto &fut) const noexcept -> typename std::remove_cvref_t<decltype(fut)>::ResultType {
             TaskWaker waker = this->waker();
             for (;;) {
                 auto status = fut.poll(waker);
-                if (status.index != 0) {
+                if (status.index() != 0) {
                     this->block();
                 }
                 else {
@@ -4611,19 +4614,19 @@ namespace fstd {
 
     template<typename T>
     struct OpaqueFuture {
-        using Result = T;
+        using ResultType = T;
 
         void *data;
-        bool (*poll_fn)(void *FSTD_MAYBE_NULL data, FSTD_TaskWaker waker, T *result);
-        void (*FSTD_MAYBE_NULL deinit_fn)(void *FSTD_MAYBE_NULL data);
+        bool (*poll_fn)(void **FSTD_MAYBE_NULL data, FSTD_TaskWaker waker, T *result);
+        void (*FSTD_MAYBE_NULL deinit_fn)(void **FSTD_MAYBE_NULL data);
 
-        void deinit() const noexcept {
+        void deinit() noexcept {
             if (this->deinit_fn)
-                this->deinit_fn(this->data);
+                this->deinit_fn(&this->data);
         }
-        PollResult<T> poll() const noexcept {
+        PollResult<T> poll(TaskWaker waker) noexcept {
             T result;
-            bool completed = this->poll_fn(this->data);
+            bool completed = this->poll_fn(&this->data, waker, &result);
             if (!completed)
                 return PollResult<T>{std::in_place_index<1>};
             return PollResult<T>{std::in_place_index<0>, std::move(result)};
@@ -4635,15 +4638,15 @@ namespace fstd {
         static std::expected<OpaqueFuture<T>, Status> enqueueFuture(T fut) noexcept {
             constexpr static usize fut_size = sizeof(T);
             constexpr static usize fut_align = alignof(T);
-            constexpr static usize result_size = sizeof(typename T::Result);
-            constexpr static usize result_align = alignof(typename T::Result);
+            constexpr static usize result_size = sizeof(typename T::ResultType);
+            constexpr static usize result_align = alignof(typename T::ResultType);
             constexpr static FSTD_TaskWaiterPollFn poll_fn =
                     +[](void *FSTD_MAYBE_NULL ptr, FSTD_TaskWaker w, void *res) {
                         T &fut = *static_cast<T *>(ptr);
-                        typename T::Result *result = static_cast<T::Result *>(res);
+                        typename T::ResultType *result = static_cast<T::Result *>(res);
                         TaskWaker waker = w;
                         auto status = fut.poll(waker);
-                        if (status.index != 0)
+                        if (status.index() != 0)
                             return false;
                         std::construct_at(result, std::get<0>(status));
                         return true;
@@ -4653,7 +4656,7 @@ namespace fstd {
                 std::destroy_at(fut);
             };
             constexpr static FSTD_TaskDeinitFn deinit_result = +[](void *FSTD_MAYBE_NULL ptr) {
-                typename T::Result *result = static_cast<T::Result *>(ptr);
+                typename T::ResultType *result = static_cast<T::ResultType *>(ptr);
                 std::destroy_at(result);
             };
 
@@ -5356,6 +5359,17 @@ namespace fstd {
         }
     };
 
+    struct ModuleExport : FSTD_ModuleExport {
+        using Type = ModuleExport;
+        using FStd = FSTD_ModuleExport;
+        constexpr ModuleExport() noexcept = default;
+        constexpr ModuleExport(const FStd &other) noexcept : FStd(other) {};
+        constexpr ModuleExport(const ModuleExport &other) noexcept = default;
+        constexpr ModuleExport(ModuleExport &&other) noexcept = default;
+        constexpr ModuleExport &operator=(const ModuleExport &other) noexcept = default;
+        constexpr ModuleExport &operator=(ModuleExport &&other) noexcept = default;
+    };
+
     struct ModuleLoader {
         using Type = ModuleLoader;
         using FStd = FSTD_ModuleLoader *;
@@ -5367,7 +5381,190 @@ namespace fstd {
         constexpr ModuleLoader &operator=(ModuleLoader &&other) noexcept = default;
         constexpr operator FSTD_ModuleLoader *() const noexcept { return this->handle; };
 
+        struct ResolvedModule {
+            std::optional<ModuleHandle> handle;
+            const ModuleExport &module;
+        };
+
+        // NOLINTNEXTLINE(performance-enum-size)
+        enum class FilterRequest : FSTD_ModuleLoaderFilterRequest {
+            Skip = FSTD_ModuleLoaderFilterRequest_Skip,
+            Load = FSTD_ModuleLoaderFilterRequest_Load,
+        };
+
         FSTD_ModuleLoader *handle;
+
+        static std::expected<ModuleLoader, Status> init() noexcept {
+            ModuleLoader loader;
+            Status status = static_cast<Status>(fstd_module_loader_init(&loader.handle));
+            if (status != Status::Ok)
+                return std::unexpected(status);
+            return loader;
+        }
+        void deinit() const noexcept { return fstd_module_loader_deinit(this->handle); }
+        bool containsModule(Slice<const char> module) const noexcept {
+            return fstd_module_loader_contains_module(this->handle, module);
+        }
+        template<typename T>
+        bool containsSymbol(ModuleSymbol<T> symbol) const noexcept {
+            return fstd_module_loader_contains_symbol(this->handle, symbol);
+        }
+        PollResult<std::expected<ResolvedModule, Result>> pollModule(TaskWaker waker,
+                                                                     Slice<const char> module) const noexcept {
+            FSTD_ModuleLoaderPollModuleResult cresult;
+            if (!fstd_module_loader_poll_module(this->handle, waker, module, &cresult))
+                return PollPending;
+            Result result = cresult.result;
+            if (result.isErr())
+                return std::unexpected(result);
+
+            std::optional<ModuleHandle> handle =
+                    cresult.value.handle ? std::optional<ModuleHandle>{cresult.value.handle} : std::nullopt;
+            const ModuleExport *module_ptr = static_cast<const ModuleExport *>(cresult.value.module);
+            return ResolvedModule{handle, *module_ptr};
+        }
+        auto pollModuleFuture(Slice<const char> module) const noexcept -> decltype(auto) {
+            struct Future {
+                ModuleLoader loader;
+                Slice<const char> module;
+                using ResultType = std::expected<ResolvedModule, Result>;
+                PollResult<ResultType> poll(TaskWaker waker) const noexcept {
+                    return this->loader.pollModule(waker, this->module);
+                }
+            };
+            return Future{.loader = *this, .module = module};
+        }
+        Status addModule(ModuleInstance owner, const ModuleExport &module) const noexcept {
+            return static_cast<Status>(fstd_module_loader_add_module(this->handle, owner, &module));
+        }
+        Status addModulesFromPath(Path path, auto &&filter) const noexcept {
+            using F = decltype(filter);
+            auto wrapper = +[](void *data, const FSTD_ModuleExport *module) {
+                F &&filter = static_cast<F &&>(*static_cast<std::remove_cvref_t<F> *>(data));
+                auto request = std::invoke_r<FilterRequest>(std::forward<F>(filter),
+                                                            *static_cast<const ModuleExport *>(module));
+                return static_cast<FSTD_ModuleLoaderFilterRequest>(request);
+            };
+            return static_cast<Status>(fstd_module_loader_add_modules_from_path(this->handle, path, &filter, wrapper));
+        }
+        Status addModulesFromIter(auto &&filter) const noexcept {
+            using F = decltype(filter);
+            auto wrapper = +[](void *data, const FSTD_ModuleExport *module) {
+                F &&filter = static_cast<F &&>(*static_cast<std::remove_cvref_t<F> *>(data));
+                auto request = std::invoke_r<FilterRequest>(std::forward<F>(filter),
+                                                            *static_cast<const ModuleExport *>(module));
+                return static_cast<FSTD_ModuleLoaderFilterRequest>(request);
+            };
+            return static_cast<Status>(fstd_module_loader_add_modules_from_iter(this->handle, &filter, wrapper));
+        }
+        OpaqueFuture<Result> commit() const noexcept {
+            return std::bit_cast<OpaqueFuture<Result>>(fstd_module_loader_commit(this->handle));
+        }
+    };
+
+    struct Modules {
+        // NOLINTNEXTLINE(performance-enum-size)
+        enum class Profile : FSTD_ModulesProfile {
+            Default = FSTD_ModulesProfile_Default,
+            Release = FSTD_ModulesProfile_Release,
+            Dev = FSTD_ModulesProfile_Dev,
+        };
+
+        // NOLINTNEXTLINE(performance-enum-size)
+        enum class FeatureTag : FSTD_ModulesFeatureTag {};
+        // NOLINTNEXTLINE(performance-enum-size)
+        enum class FeatureRequestFlag : FSTD_ModulesFeatureRequestFlag {
+            Required = FSTD_ModulesFeatureRequestFlag_Required,
+            On = FSTD_ModulesFeatureRequestFlag_On,
+            Off = FSTD_ModulesFeatureRequestFlag_Off,
+        };
+        struct FeatureRequest : FSTD_ModulesFeatureRequest {
+            using Type = FeatureRequest;
+            using FStd = FSTD_ModulesFeatureRequest;
+            constexpr FeatureRequest() noexcept = default;
+            constexpr FeatureRequest(FeatureTag tag) noexcept : FeatureRequest(tag, FeatureRequestFlag::Required) {};
+            constexpr FeatureRequest(FeatureTag tag, FeatureRequestFlag flag) noexcept :
+                FStd{.tag = static_cast<FSTD_ModulesFeatureTag>(tag),
+                     .flag = static_cast<FSTD_ModulesFeatureRequestFlag>(flag)} {};
+            constexpr FeatureRequest(const FStd &other) noexcept : FStd(other) {};
+            constexpr FeatureRequest(const FeatureRequest &other) noexcept = default;
+            constexpr FeatureRequest(FeatureRequest &&other) noexcept = default;
+            constexpr FeatureRequest &operator=(const FeatureRequest &other) noexcept = default;
+            constexpr FeatureRequest &operator=(FeatureRequest &&other) noexcept = default;
+        };
+
+        // NOLINTNEXTLINE(performance-enum-size)
+        enum class FeatureStatusFlag : FSTD_ModulesFeatureStatusFlag {
+            On = FSTD_ModulesFeatureStatusFlag_On,
+            Off = FSTD_ModulesFeatureStatusFlag_Off,
+        };
+        struct FeatureStatus : FSTD_ModulesFeatureStatus {
+            using Type = FeatureStatus;
+            using FStd = FSTD_ModulesFeatureStatus;
+            constexpr FeatureStatus() noexcept = default;
+            constexpr FeatureStatus(FeatureTag tag, FeatureStatusFlag flag) noexcept :
+                FStd{.tag = static_cast<FSTD_ModulesFeatureTag>(tag),
+                     .flag = static_cast<FSTD_ModulesFeatureStatusFlag>(flag)} {};
+            constexpr FeatureStatus(const FStd &other) noexcept : FStd(other) {};
+            constexpr FeatureStatus(const FeatureStatus &other) noexcept = default;
+            constexpr FeatureStatus(FeatureStatus &&other) noexcept = default;
+            constexpr FeatureStatus &operator=(const FeatureStatus &other) noexcept = default;
+            constexpr FeatureStatus &operator=(FeatureStatus &&other) noexcept = default;
+        };
+        constexpr static Profile DefaultProfile = static_cast<Profile>(FSTD_MODULES_DEFAULT_PROFILE);
+
+        struct Cfg : FSTD_ModulesCfg {
+            using Type = Cfg;
+            using FStd = FSTD_ModulesCfg;
+            constexpr Cfg() noexcept :
+                FSTD_ModulesCfg{
+                        .id = {.id = static_cast<FSTD_CfgId>(CfgId::Modules)},
+                        .profile = static_cast<FSTD_ModulesProfile>(DefaultProfile),
+                        .features = {},
+                } {};
+            constexpr Cfg(Profile profile, Slice<const FeatureRequest> features) noexcept :
+                FSTD_ModulesCfg{
+                        .id = {.id = static_cast<FSTD_CfgId>(CfgId::Modules)},
+                        .profile = static_cast<FSTD_ModulesProfile>(profile),
+                        .features = features,
+                } {};
+            constexpr Cfg(const FStd &other) noexcept : FStd(other) {};
+            constexpr Cfg(const Cfg &other) noexcept = default;
+            constexpr Cfg(Cfg &&other) noexcept = default;
+            constexpr Cfg &operator=(const Cfg &other) noexcept = default;
+            constexpr Cfg &operator=(Cfg &&other) noexcept = default;
+        };
+
+        static Profile profile() noexcept { return static_cast<Profile>(fstd_modules_profile()); }
+        static Slice<const FeatureStatus> features() noexcept {
+            auto features = fstd_modules_features();
+            return {static_cast<const FeatureStatus *>(features.ptr), features.len};
+        }
+        static bool nsExists(Slice<const char> ns) noexcept { return fstd_modules_namespace_exists(ns); }
+        static Status pruneInstances() noexcept { return static_cast<Status>(fstd_modules_prune_instances()); }
+        static std::expected<ModuleParamInfo, Status> queryParameter(Slice<const char> module,
+                                                                     Slice<const char> parameter) noexcept {
+            ModuleParamInfo info{};
+            Status status = static_cast<Status>(fstd_modules_query_parameter(module, parameter, &info));
+            if (status != Status::Ok)
+                return std::unexpected(status);
+            return info;
+        }
+        template<typename T>
+        std::expected<T, Status> readParameter(Slice<const char> module, Slice<const char> parameter) const noexcept {
+            T value;
+            ModuleParamTag tag = ModuleParamUtil<T>::ParamTag;
+            Status status = static_cast<Status>(fstd_modules_read_parameter_opaque(tag, module, parameter, &value));
+            if (status != Status::Ok)
+                return std::unexpected(status);
+            return value;
+        }
+        template<typename T>
+        Status writeParameter(Slice<const char> module, Slice<const char> parameter, const T value) const noexcept {
+            ModuleParamTag tag = ModuleParamUtil<T>::ParamTag;
+            Status status = static_cast<Status>(fstd_modules_write_parameter_opaque(tag, module, parameter, &value));
+            return status;
+        }
     };
 
 } // namespace fstd
