@@ -2123,8 +2123,8 @@ fstd_func void fstd_call_stack_resume_current(void);
 ///
 /// The formatter function is allowed to format only part of the message, if it would not fit into
 /// the buffer. Must return the number of bytes written.
-typedef FSTD_USize (*fstd_tracing_fmt_fn)(void *FSTD_MAYBE_NULL data, char *FSTD_MAYBE_NULL buffer,
-                                          FSTD_USize buffer_len);
+typedef FSTD_USize (*FSTD_TracingFmtFn)(const void *FSTD_MAYBE_NULL data, char *FSTD_MAYBE_NULL buffer,
+                                        FSTD_USize buffer_len);
 
 fstd_util FSTD_USize fstd__tracing_fmt_null(void *FSTD_MAYBE_NULL arg0, char *FSTD_MAYBE_NULL arg1, FSTD_USize arg2) {
     FSTD_UNUSED(arg0, arg1, arg2);
@@ -2144,7 +2144,7 @@ typedef struct {
     va_list *vlist;
 } FSTD__TracingFmtPrintArgs;
 
-fstd_util FSTD_USize fstd__tracing_fmt_print(void *data, char *FSTD_MAYBE_NULL buffer, FSTD_USize buffer_len) {
+fstd_util FSTD_USize fstd__tracing_fmt_print(const void *data, char *FSTD_MAYBE_NULL buffer, FSTD_USize buffer_len) {
     FSTD_PRAGMA_MSVC(warning(push))
     FSTD_PRAGMA_MSVC(warning(disable : 4996))
     FSTD__TracingFmtPrintArgs *args = (FSTD__TracingFmtPrintArgs *)data;
@@ -2174,9 +2174,9 @@ typedef struct {
     void (*unblock_call_stack)(FSTD_CallStack *stack);
     void (*suspend_current_call_stack)(bool mark_blocked);
     void (*resume_current_call_stack)(void);
-    void (*enter_span)(const FSTD_TracingEventInfo *info, fstd_tracing_fmt_fn fmt, const void *fmt_data);
+    void (*enter_span)(const FSTD_TracingEventInfo *info, FSTD_TracingFmtFn fmt, const void *fmt_data);
     void (*exit_span)(const FSTD_TracingEventInfo *info);
-    void (*log_message)(const FSTD_TracingEventInfo *info, fstd_tracing_fmt_fn fmt, const void *fmt_data);
+    void (*log_message)(const FSTD_TracingEventInfo *info, FSTD_TracingFmtFn fmt, const void *fmt_data);
 } FSTD_TracingVtable;
 
 /// Checks whether the tracing subsystem is enabled.
@@ -2206,7 +2206,7 @@ fstd_func void fstd_tracing_unregister_thread(void);
 /// Once entered, the span is used as the context for succeeding events. Each `enter` operation
 /// must be accompanied with a `exit` operation in reverse entering order. A span may be entered
 /// multiple times. The formatting function may be used to assign a name to the entered span.
-fstd_func void fstd_tracing_enter_span(const FSTD_TracingEventInfo *info, fstd_tracing_fmt_fn fmt,
+fstd_func void fstd_tracing_enter_span(const FSTD_TracingEventInfo *info, FSTD_TracingFmtFn fmt,
                                        const void *FSTD_MAYBE_NULL fmt_data);
 
 /// Enters the span.
@@ -2232,7 +2232,7 @@ fstd_util void fstd_tracing_enter_span_fmt(const FSTD_TracingEventInfo *info, co
 fstd_func void fstd_tracing_exit_span(const FSTD_TracingEventInfo *info);
 
 /// Logs a message with a custom format function.
-fstd_func void fstd_tracing_log_message(const FSTD_TracingEventInfo *info, fstd_tracing_fmt_fn fmt,
+fstd_func void fstd_tracing_log_message(const FSTD_TracingEventInfo *info, FSTD_TracingFmtFn fmt,
                                         const void *FSTD_MAYBE_NULL fmt_data);
 
 /// Logs a message with a formatter accepting a `printf` format string.
@@ -3767,9 +3767,11 @@ struct FSTD_Ctx {
 #include <compare>
 #include <concepts>
 #include <expected>
+#include <format>
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <source_location>
 #include <string>
 #include <type_traits>
 #include <variant>
@@ -4679,269 +4681,709 @@ namespace fstd {
     // tracing subsystem -----------------------
     // -----------------------------------------
 
-    // NOLINTNEXTLINE(performance-enum-size)
-    enum class TracingLevel : FSTD_TracingLevel {
-        Off = FSTD_TracingLevel_Off,
-        Error = FSTD_TracingLevel_Error,
-        Warn = FSTD_TracingLevel_Warn,
-        Info = FSTD_TracingLevel_Info,
-        Debug = FSTD_TracingLevel_Debug,
-        Trace = FSTD_TracingLevel_Trace,
-    };
-    constexpr static TracingLevel TracingDefaultLevel = static_cast<TracingLevel>(FSTD_TRACING_DEFAULT_LEVEL);
-    constexpr static TracingLevel TracingMaxLevel = static_cast<TracingLevel>(FSTD_TRACING_MAX_LEVEL);
+    namespace tracing {
+        // NOLINTNEXTLINE(performance-enum-size)
+        enum class Level : FSTD_TracingLevel {
+            Off = FSTD_TracingLevel_Off,
+            Error = FSTD_TracingLevel_Error,
+            Warn = FSTD_TracingLevel_Warn,
+            Info = FSTD_TracingLevel_Info,
+            Debug = FSTD_TracingLevel_Debug,
+            Trace = FSTD_TracingLevel_Trace,
+        };
+        constexpr static Level DefaultLevel = static_cast<Level>(FSTD_TRACING_DEFAULT_LEVEL);
+        constexpr static Level DefaultMaxLevel = static_cast<Level>(FSTD_TRACING_MAX_LEVEL);
 
-    struct Subscriber : FSTD_Subscriber {
-        using Type = Subscriber;
-        using FStd = FSTD_Subscriber;
-        constexpr Subscriber() noexcept = default;
-        constexpr Subscriber(const FStd &other) noexcept : FStd(other) {};
-        constexpr Subscriber(const Subscriber &other) noexcept = default;
-        constexpr Subscriber(Subscriber &&other) noexcept = default;
-        constexpr Subscriber &operator=(const Subscriber &other) noexcept = default;
-        constexpr Subscriber &operator=(Subscriber &&other) noexcept = default;
+        struct EventInfo : FSTD_TracingEventInfo {
+            using Type = EventInfo;
+            using FStd = FSTD_TracingEventInfo;
+            constexpr EventInfo() noexcept = default;
+            constexpr EventInfo(const FStd &other) noexcept : FStd(other) {};
+            constexpr EventInfo(const EventInfo &other) noexcept = default;
+            constexpr EventInfo(EventInfo &&other) noexcept = default;
+            constexpr EventInfo &operator=(const EventInfo &other) noexcept = default;
+            constexpr EventInfo &operator=(EventInfo &&other) noexcept = default;
 
-        using EventTag = FSTD_TracingEventTag;
-        using Start = FSTD_TracingEventStart;
-        using Finish = FSTD_TracingEventFinish;
-        using RegisterThread = FSTD_TracingEventRegisterThread;
-        using UnregisterThread = FSTD_TracingEventUnregisterThread;
-        using CreateCallStack = FSTD_TracingEventCreateCallStack;
-        using DestroyCallStack = FSTD_TracingEventDestroyCallStack;
-        using UnblockCallStack = FSTD_TracingEventUnblockCallStack;
-        using SuspendCallStack = FSTD_TracingEventSuspendCallStack;
-        using ResumeCallStack = FSTD_TracingEventResumeCallStack;
-        using EnterSpan = FSTD_TracingEventEnterSpan;
-        using ExitSpan = FSTD_TracingEventExitSpan;
-        using LogMessage = FSTD_TracingEventLogMessage;
-        using DeclareEventInfo = FSTD_TracingEventDeclareEventInfo;
-        using StartThread = FSTD_TracingEventStartThread;
-        using StopThread = FSTD_TracingEventStopThread;
-        using LoadImage = FSTD_TracingEventLoadImage;
-        using UnloadImage = FSTD_TracingEventUnloadImage;
-        using ContextSwitch = FSTD_TracingEventContextSwitch;
-        using ThreadWakeup = FSTD_TracingEventThreadWakeup;
-        using CallStackSample = FSTD_TracingEventCallStackSample;
+            constexpr static EventInfo at(Level lvl,
+                                          std::source_location loc = std::source_location::current()) noexcept {
+                return at(nullptr, nullptr, lvl, loc);
+            }
+            constexpr static EventInfo at(const char *FSTD_MAYBE_NULL scope, Level lvl,
+                                          std::source_location loc = std::source_location::current()) noexcept {
+                return at(nullptr, scope, lvl, loc);
+            }
+            constexpr static EventInfo at(const char *FSTD_MAYBE_NULL target, const char *FSTD_MAYBE_NULL scope,
+                                          Level lvl,
+                                          std::source_location loc = std::source_location::current()) noexcept {
+                return FSTD_TracingEventInfo{
+                        .name = loc.function_name(),
+                        .target = target ? target : "",
+                        .scope = scope ? scope : "",
+                        .file_name = loc.file_name(),
+                        .line_number = static_cast<i32>(loc.line()),
+                        .level = static_cast<FSTD_TracingLevel>(lvl),
+                };
+            }
+        };
 
-        template<typename T>
-        static Subscriber init(T &ptr) noexcept {
-            constexpr static auto on_event = +[](void *data, const EventTag *tag) {
-                T &sub = *static_cast<T *>(data);
-                switch (*tag) {
-                    case FSTD_TracingEventTag_Start: {
-                        if constexpr (requires { sub.onEvent(std::declval<Start>()); }) {
-                            const auto *event = fstd_parent_of_const(Start, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_Finish: {
-                        if constexpr (requires { sub.onEvent(std::declval<Finish>()); }) {
-                            const auto *event = fstd_parent_of_const(Finish, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_RegisterThread: {
-                        if constexpr (requires { sub.onEvent(std::declval<RegisterThread>()); }) {
-                            const auto *event = fstd_parent_of_const(RegisterThread, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_UnregisterThread: {
-                        if constexpr (requires { sub.onEvent(std::declval<UnregisterThread>()); }) {
-                            const auto *event = fstd_parent_of_const(UnregisterThread, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_CreateCallStack: {
-                        if constexpr (requires { sub.onEvent(std::declval<CreateCallStack>()); }) {
-                            const auto *event = fstd_parent_of_const(CreateCallStack, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_DestroyCallStack: {
-                        if constexpr (requires { sub.onEvent(std::declval<DestroyCallStack>()); }) {
-                            const auto *event = fstd_parent_of_const(DestroyCallStack, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_UnblockCallStack: {
-                        if constexpr (requires { sub.onEvent(std::declval<UnblockCallStack>()); }) {
-                            const auto *event = fstd_parent_of_const(UnblockCallStack, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_SuspendCallStack: {
-                        if constexpr (requires { sub.onEvent(std::declval<SuspendCallStack>()); }) {
-                            const auto *event = fstd_parent_of_const(SuspendCallStack, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_ResumeCallStack: {
-                        if constexpr (requires { sub.onEvent(std::declval<ResumeCallStack>()); }) {
-                            const auto *event = fstd_parent_of_const(ResumeCallStack, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_EnterSpan: {
-                        if constexpr (requires { sub.onEvent(std::declval<EnterSpan>()); }) {
-                            const auto *event = fstd_parent_of_const(EnterSpan, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_ExitSpan: {
-                        if constexpr (requires { sub.onEvent(std::declval<ExitSpan>()); }) {
-                            const auto *event = fstd_parent_of_const(ExitSpan, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_LogMessage: {
-                        if constexpr (requires { sub.onEvent(std::declval<LogMessage>()); }) {
-                            const auto *event = fstd_parent_of_const(LogMessage, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_DeclareEventInfo: {
-                        if constexpr (requires { sub.onEvent(std::declval<DeclareEventInfo>()); }) {
-                            const auto *event = fstd_parent_of_const(DeclareEventInfo, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_StartThread: {
-                        if constexpr (requires { sub.onEvent(std::declval<StartThread>()); }) {
-                            const auto *event = fstd_parent_of_const(StartThread, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_StopThread: {
-                        if constexpr (requires { sub.onEvent(std::declval<StopThread>()); }) {
-                            const auto *event = fstd_parent_of_const(StopThread, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_LoadImage: {
-                        if constexpr (requires { sub.onEvent(std::declval<LoadImage>()); }) {
-                            const auto *event = fstd_parent_of_const(LoadImage, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_UnloadImage: {
-                        if constexpr (requires { sub.onEvent(std::declval<UnloadImage>()); }) {
-                            const auto *event = fstd_parent_of_const(UnloadImage, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_ContextSwitch: {
-                        if constexpr (requires { sub.onEvent(std::declval<ContextSwitch>()); }) {
-                            const auto *event = fstd_parent_of_const(ContextSwitch, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_ThreadWakeup: {
-                        if constexpr (requires { sub.onEvent(std::declval<ThreadWakeup>()); }) {
-                            const auto *event = fstd_parent_of_const(ThreadWakeup, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    case FSTD_TracingEventTag_CallStackSample: {
-                        if constexpr (requires { sub.onEvent(std::declval<CallStackSample>()); }) {
-                            const auto *event = fstd_parent_of_const(CallStackSample, tag, &sub);
-                            sub.onEvent(*event);
-                        }
-                    } break;
-                    default:
-                        break;
+        using Formatter = FSTD_TracingFmtFn;
+
+        struct Span {
+            struct Auto {
+                constexpr Auto(Span span, Formatter fmt, const void *data) noexcept : id(span.id) {
+                    fstd_tracing_enter_span(&this->id, fmt, data);
+                }
+                constexpr Auto(const Auto &other) noexcept = delete;
+                constexpr Auto(Auto &&other) noexcept = delete;
+                ~Auto() noexcept { fstd_tracing_exit_span(&this->id); }
+                constexpr Auto &operator=(const Auto &other) = delete;
+                constexpr Auto &operator=(Auto &&other) = delete;
+
+                const EventInfo &id;
+            };
+
+            const EventInfo &id;
+
+            template<typename Unique = decltype([] {})>
+            static Span at(Level lvl, std::source_location loc = std::source_location::current()) noexcept {
+                return at<Unique>(nullptr, nullptr, lvl, loc);
+            }
+            template<typename Unique = decltype([] {})>
+            static Span at(const char *FSTD_MAYBE_NULL scope, Level lvl,
+                           std::source_location loc = std::source_location::current()) noexcept {
+                return at<Unique>(nullptr, scope, lvl, loc);
+            }
+            template<typename Unique = decltype([] {})>
+            static Span at(const char *FSTD_MAYBE_NULL target, const char *FSTD_MAYBE_NULL scope, Level lvl,
+                           std::source_location loc = std::source_location::current()) noexcept {
+                const static EventInfo id = EventInfo::at(target, scope, lvl, loc);
+                return {.id = id};
+            }
+
+            void enter(Formatter fmt, const void *data) const noexcept {
+                fstd_tracing_enter_span(&this->id, fmt, data);
+            }
+            void exit() const noexcept { fstd_tracing_exit_span(&this->id); }
+        };
+
+        namespace impl {
+            inline void expectedNullTerminatedArray() {}
+
+            template<std::size_t N>
+            struct ConstString {
+                char str[N]{};
+
+                static constexpr std::size_t size = N - 1;
+
+                consteval ConstString() {}
+                consteval ConstString(const char (&new_str)[N]) {
+                    if (new_str[N - 1] != '\0')
+                        expectedNullTerminatedArray();
+                    std::copy_n(new_str, size, str);
                 }
             };
 
-            return FSTD_Subscriber{
-                    .data = &ptr,
-                    .on_event = nullptr,
+            template<typename... Args>
+            struct FormatString_ {
+                std::format_string<Args...> fmt;
+                std::source_location loc = std::source_location::current();
+
+                template<class T>
+                    requires std::constructible_from<std::format_string<Args...>, T const &>
+                consteval FormatString_(T const &fmt, std::source_location loc = std::source_location::current()) :
+                    fmt(fmt), loc(loc){};
             };
+
+            template<typename... Args>
+            using FormatString = impl::FormatString_<std::type_identity_t<Args>...>;
+        } // namespace impl
+
+        constexpr static const char DefaultScope[] = FSTD_TRACING_DEFAULT_SCOPE;
+        constexpr static const char DefaultTarget[] = FSTD_TRACING_DEFAULT_TARGET;
+        template<impl::ConstString scope = DefaultScope, Level max_level = DefaultMaxLevel>
+        struct Scope {
+            template<impl::ConstString target = DefaultTarget, Level max_lvl = max_level>
+            struct Target {
+                template<typename Unique = decltype([] {}), typename... Args>
+                static void logErr(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                    logStatic<Unique, Level::Error, Args...>(fmt, std::forward<Args>(args)...);
+                }
+                template<typename Unique = decltype([] {}), typename... Args>
+                static void logWarn(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                    logStatic<Unique, Level::Warn, Args...>(fmt, std::forward<Args>(args)...);
+                }
+                template<typename Unique = decltype([] {}), typename... Args>
+                static void logInfo(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                    logStatic<Unique, Level::Info, Args...>(fmt, std::forward<Args>(args)...);
+                }
+                template<typename Unique = decltype([] {}), typename... Args>
+                static void logDebug(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                    logStatic<Unique, Level::Debug, Args...>(fmt, std::forward<Args>(args)...);
+                }
+                template<typename Unique = decltype([] {}), typename... Args>
+                static void logTrace(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                    logStatic<Unique, Level::Trace, Args...>(fmt, std::forward<Args>(args)...);
+                }
+                template<typename Unique = decltype([] {}), typename... Args>
+                static void log(Level lvl, impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                    const auto formatter = [fmt, &args...](Slice<char> buffer) -> usize {
+                        std::format_to_n_result result =
+                                std::format_to_n(buffer.ptr, buffer.len, fmt.fmt, std::forward<Args>(args)...);
+                        return result.size;
+                    };
+                    using Fmt = decltype(formatter);
+                    const auto trampoline = +[](const void *data, char *buffer, usize buffer_len) -> usize {
+                        const Fmt &fmt = *static_cast<const Fmt *>(data);
+                        return fmt({buffer, buffer_len});
+                    };
+                    logWithFormatter<Unique, Args...>(lvl, trampoline, &formatter, fmt.loc);
+                }
+                template<typename Unique = decltype([] {}), Level lvl, typename... Args>
+                static void logStatic(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                    const auto formatter = [fmt, &args...](Slice<char> buffer) -> usize {
+                        std::format_to_n_result result =
+                                std::format_to_n(buffer.ptr, buffer.len, fmt.fmt, std::forward<Args>(args)...);
+                        return result.size;
+                    };
+                    using Fmt = decltype(formatter);
+                    const auto trampoline = +[](const void *data, char *buffer, usize buffer_len) -> usize {
+                        const Fmt &fmt = *static_cast<const Fmt *>(data);
+                        return fmt({buffer, buffer_len});
+                    };
+                    logWithFormatterStatic<Unique, lvl, Args...>(trampoline, &formatter, fmt.loc);
+                }
+                template<typename Unique = decltype([] {})>
+                static void logWithFormatter(Level lvl, Formatter fmt, const void *data,
+                                             std::source_location loc = std::source_location::current()) noexcept {
+                    if (static_cast<FSTD_TracingLevel>(max_lvl) < static_cast<FSTD_TracingLevel>(lvl))
+                        return;
+                    const static EventInfo info = EventInfo::at(target.str, scope.str, lvl, loc);
+                    fstd_tracing_log_message(&info, fmt, data);
+                }
+                template<typename Unique = decltype([] {}), Level lvl>
+                static void
+                logWithFormatterStatic(Formatter fmt, const void *data,
+                                       std::source_location loc = std::source_location::current()) noexcept {
+                    if constexpr (static_cast<FSTD_TracingLevel>(max_lvl) < static_cast<FSTD_TracingLevel>(lvl))
+                        return;
+                    const static EventInfo info = EventInfo::at(target.str, scope.str, lvl, loc);
+                    fstd_tracing_log_message(&info, fmt, data);
+                }
+                template<typename Unique = decltype([] {})>
+                static auto spanErr() noexcept {
+                    return spanStatic<Unique, Level::Error>();
+                }
+                template<typename Unique = decltype([] {}), typename... Args>
+                static auto spanErr(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                    return spanStatic<Unique, Level::Error, Args...>(fmt, std::forward<Args>(args)...);
+                }
+                template<typename Unique = decltype([] {})>
+                static auto spanWarn() noexcept {
+                    return spanStatic<Unique, Level::Warn>();
+                }
+                template<typename Unique = decltype([] {}), typename... Args>
+                static auto spanWarn(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                    return spanStatic<Unique, Level::Warn, Args...>(fmt, std::forward<Args>(args)...);
+                }
+                template<typename Unique = decltype([] {})>
+                static auto spanInfo() noexcept {
+                    return spanStatic<Unique, Level::Info>();
+                }
+                template<typename Unique = decltype([] {}), typename... Args>
+                static auto spanInfo(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                    return spanStatic<Unique, Level::Info, Args...>(fmt, std::forward<Args>(args)...);
+                }
+                template<typename Unique = decltype([] {})>
+                static auto spanDebug() noexcept {
+                    return spanStatic<Unique, Level::Debug>();
+                }
+                template<typename Unique = decltype([] {}), typename... Args>
+                static auto spanDebug(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                    return spanStatic<Unique, Level::Debug, Args...>(fmt, std::forward<Args>(args)...);
+                }
+                template<typename Unique = decltype([] {})>
+                static auto spanTrace() noexcept {
+                    return spanStatic<Unique, Level::Trace>();
+                }
+                template<typename Unique = decltype([] {}), typename... Args>
+                static auto spanTrace(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                    return spanStatic<Unique, Level::Trace, Args...>(fmt, std::forward<Args>(args)...);
+                }
+                template<typename Unique = decltype([] {})>
+                static std::optional<Span::Auto> span(Level lvl) noexcept {
+                    return span<Unique>(lvl, "");
+                }
+                template<typename Unique = decltype([] {}), Level lvl>
+                static auto spanStatic() noexcept {
+                    return spanStatic<Unique, lvl>("");
+                }
+                template<typename Unique = decltype([] {}), typename... Args>
+                static std::optional<Span::Auto> span(Level lvl, impl::FormatString<Args...> fmt,
+                                                      Args &&...args) noexcept {
+                    const auto formatter = [fmt, &args...](Slice<char> buffer) -> usize {
+                        std::format_to_n_result result =
+                                std::format_to_n(buffer.ptr, buffer.len, fmt.fmt, std::forward<Args>(args)...);
+                        return result.size;
+                    };
+                    using Fmt = decltype(formatter);
+                    const auto trampoline = +[](const void *data, char *buffer, usize buffer_len) -> usize {
+                        const Fmt &fmt = *static_cast<const Fmt *>(data);
+                        return fmt({buffer, buffer_len});
+                    };
+                    return spanWithFormatter<Unique, Args...>(lvl, trampoline, &formatter, fmt.loc);
+                }
+                template<typename Unique = decltype([] {}), Level lvl, typename... Args>
+                static auto spanStatic(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                    const auto formatter = [fmt, &args...](Slice<char> buffer) -> usize {
+                        std::format_to_n_result result =
+                                std::format_to_n(buffer.ptr, buffer.len, fmt.fmt, std::forward<Args>(args)...);
+                        return result.size;
+                    };
+                    using Fmt = decltype(formatter);
+                    const auto trampoline = +[](const void *data, char *buffer, usize buffer_len) -> usize {
+                        const Fmt &fmt = *static_cast<const Fmt *>(data);
+                        return fmt({buffer, buffer_len});
+                    };
+                    return spanWithFormatterStatic<Unique, lvl, Args...>(trampoline, &formatter, fmt.loc);
+                }
+                template<typename Unique = decltype([] {})>
+                static std::optional<Span::Auto>
+                spanWithFormatter(Level lvl, Formatter fmt, const void *data,
+                                  std::source_location loc = std::source_location::current()) noexcept {
+                    if (static_cast<FSTD_TracingLevel>(max_lvl) < static_cast<FSTD_TracingLevel>(lvl))
+                        return std::nullopt;
+                    Span span = Span::at<Unique>(target.str, scope.str, lvl, loc);
+                    return std::optional<Span::Auto>{std::in_place, span, fmt, data};
+                }
+                template<typename Unique = decltype([] {}), Level lvl>
+                static auto
+                spanWithFormatterStatic(Formatter fmt, const void *data,
+                                        std::source_location loc = std::source_location::current()) noexcept {
+                    if constexpr (static_cast<FSTD_TracingLevel>(max_lvl) < static_cast<FSTD_TracingLevel>(lvl)) {
+                        struct Dummy {};
+                        return Dummy{};
+                    }
+                    else {
+                        Span span = Span::at<Unique>(target.str, scope.str, lvl, loc);
+                        return Span::Auto{span, fmt, data};
+                    }
+                }
+            };
+            using DefaultCtx = Target<>;
+
+            template<typename Unique = decltype([] {}), typename... Args>
+            static void logErr(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                DefaultCtx::template logErr<Unique, Args...>(fmt, std::forward<Args>(args)...);
+            }
+            template<typename Unique = decltype([] {}), typename... Args>
+            static void logWarn(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                DefaultCtx::template logWarn<Unique, Args...>(fmt, std::forward<Args>(args)...);
+            }
+            template<typename Unique = decltype([] {}), typename... Args>
+            static void logInfo(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                DefaultCtx::template logInfo<Unique, Args...>(fmt, std::forward<Args>(args)...);
+            }
+            template<typename Unique = decltype([] {}), typename... Args>
+            static void logDebug(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                DefaultCtx::template logDebug<Unique, Args...>(fmt, std::forward<Args>(args)...);
+            }
+            template<typename Unique = decltype([] {}), typename... Args>
+            static void logTrace(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                DefaultCtx::template logTrace<Unique, Args...>(fmt, std::forward<Args>(args)...);
+            }
+            template<typename Unique = decltype([] {}), typename... Args>
+            static void log(Level lvl, impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                DefaultCtx::template log<Unique, Args...>(lvl, fmt, std::forward<Args>(args)...);
+            }
+            template<typename Unique = decltype([] {})>
+            static void logWithFormatter(Level lvl, Formatter fmt, const void *data,
+                                         std::source_location loc = std::source_location::current()) noexcept {
+                DefaultCtx::template logWithFormatter<Unique>(lvl, fmt, data, loc);
+            }
+            template<typename Unique = decltype([] {})>
+            static auto spanErr() noexcept {
+                return DefaultCtx::template spanErr<Unique>();
+            }
+            template<typename Unique = decltype([] {}), typename... Args>
+            static auto spanErr(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                return DefaultCtx::template spanErr<Unique, Args...>(fmt, std::forward<Args>(args)...);
+            }
+            template<typename Unique = decltype([] {})>
+            static auto spanWarn() noexcept {
+                return DefaultCtx::template spanWarn<Unique>();
+            }
+            template<typename Unique = decltype([] {}), typename... Args>
+            static auto spanWarn(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                return DefaultCtx::template spanWarn<Unique, Args...>(fmt, std::forward<Args>(args)...);
+            }
+            template<typename Unique = decltype([] {})>
+            static auto spanInfo() noexcept {
+                return DefaultCtx::template spanInfo<Unique>();
+            }
+            template<typename Unique = decltype([] {}), typename... Args>
+            static auto spanInfo(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                return DefaultCtx::template spanInfo<Unique, Args...>(fmt, std::forward<Args>(args)...);
+            }
+            template<typename Unique = decltype([] {})>
+            static auto spanDebug() noexcept {
+                return DefaultCtx::template spanDebug<Unique>();
+            }
+            template<typename Unique = decltype([] {}), typename... Args>
+            static auto spanDebug(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                return DefaultCtx::template spanDebug<Unique, Args...>(fmt, std::forward<Args>(args)...);
+            }
+            template<typename Unique = decltype([] {})>
+            static auto spanTrace() noexcept {
+                return DefaultCtx::template spanTrace<Unique>();
+            }
+            template<typename Unique = decltype([] {}), typename... Args>
+            static auto spanTrace(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                return DefaultCtx::template spanTrace<Unique, Args...>(fmt, std::forward<Args>(args)...);
+            }
+            template<typename Unique = decltype([] {})>
+            static std::optional<Span::Auto> span(Level lvl) noexcept {
+                return DefaultCtx::template span<Unique>(lvl);
+            }
+            template<typename Unique = decltype([] {}), typename... Args>
+            static std::optional<Span::Auto> span(Level lvl, impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                return DefaultCtx::template span<Unique, Args...>(lvl, fmt, std::forward<Args>(args)...);
+            }
+            template<typename Unique = decltype([] {})>
+            static std::optional<Span::Auto>
+            spanWithFormatter(Level lvl, Formatter fmt, const void *data,
+                              std::source_location loc = std::source_location::current()) noexcept {
+                return DefaultCtx::template spanWithFormatter<Unique>(lvl, fmt, data, loc);
+            }
+        };
+        using DefaultScopeCtx = Scope<>;
+        using DefaultCtx = DefaultScopeCtx::DefaultCtx;
+
+        template<typename Unique = decltype([] {}), typename... Args>
+        static void logErr(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            DefaultScopeCtx::template logErr<Unique, Args...>(fmt, std::forward<Args>(args)...);
+        }
+        template<typename Unique = decltype([] {}), typename... Args>
+        static void logWarn(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            DefaultScopeCtx::template logWarn<Unique, Args...>(fmt, std::forward<Args>(args)...);
+        }
+        template<typename Unique = decltype([] {}), typename... Args>
+        static void logInfo(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            DefaultScopeCtx::template logInfo<Unique, Args...>(fmt, std::forward<Args>(args)...);
+        }
+        template<typename Unique = decltype([] {}), typename... Args>
+        static void logDebug(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            DefaultScopeCtx::template logDebug<Unique, Args...>(fmt, std::forward<Args>(args)...);
+        }
+        template<typename Unique = decltype([] {}), typename... Args>
+        static void logTrace(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            DefaultScopeCtx::template logTrace<Unique, Args...>(fmt, std::forward<Args>(args)...);
+        }
+        template<typename Unique = decltype([] {}), typename... Args>
+        static void log(Level lvl, impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            DefaultScopeCtx::template log<Unique, Args...>(lvl, fmt, std::forward<Args>(args)...);
+        }
+        template<typename Unique = decltype([] {})>
+        static void logWithFormatter(Level lvl, Formatter fmt, const void *data,
+                                     std::source_location loc = std::source_location::current()) noexcept {
+            DefaultScopeCtx::template logWithFormatter<Unique>(lvl, fmt, data, loc);
+        }
+        template<typename Unique = decltype([] {})>
+        static auto spanErr() noexcept {
+            return DefaultScopeCtx::template spanErr<Unique>();
+        }
+        template<typename Unique = decltype([] {}), typename... Args>
+        static auto spanErr(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            return DefaultScopeCtx::template spanErr<Unique, Args...>(fmt, std::forward<Args>(args)...);
+        }
+        template<typename Unique = decltype([] {})>
+        static auto spanWarn() noexcept {
+            return DefaultScopeCtx::template spanWarn<Unique>();
+        }
+        template<typename Unique = decltype([] {}), typename... Args>
+        static auto spanWarn(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            return DefaultScopeCtx::template spanWarn<Unique, Args...>(fmt, std::forward<Args>(args)...);
+        }
+        template<typename Unique = decltype([] {})>
+        static auto spanInfo() noexcept {
+            return DefaultScopeCtx::template spanInfo<Unique>();
+        }
+        template<typename Unique = decltype([] {}), typename... Args>
+        static auto spanInfo(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            return DefaultScopeCtx::template spanInfo<Unique, Args...>(fmt, std::forward<Args>(args)...);
+        }
+        template<typename Unique = decltype([] {})>
+        static auto spanDebug() noexcept {
+            return DefaultScopeCtx::template spanDebug<Unique>();
+        }
+        template<typename Unique = decltype([] {}), typename... Args>
+        static auto spanDebug(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            return DefaultScopeCtx::template spanDebug<Unique, Args...>(fmt, std::forward<Args>(args)...);
+        }
+        template<typename Unique = decltype([] {})>
+        static auto spanTrace() noexcept {
+            return DefaultScopeCtx::template spanTrace<Unique>();
+        }
+        template<typename Unique = decltype([] {}), typename... Args>
+        static auto spanTrace(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            return DefaultScopeCtx::template spanTrace<Unique, Args...>(fmt, std::forward<Args>(args)...);
+        }
+        template<typename Unique = decltype([] {})>
+        static std::optional<Span::Auto> span(Level lvl) noexcept {
+            return DefaultScopeCtx::template span<Unique>(lvl);
+        }
+        template<typename Unique = decltype([] {}), typename... Args>
+        static std::optional<Span::Auto> span(Level lvl, impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            return DefaultScopeCtx::template span<Unique, Args...>(lvl, fmt, std::forward<Args>(args)...);
+        }
+        template<typename Unique = decltype([] {})>
+        static std::optional<Span::Auto>
+        spanWithFormatter(Level lvl, Formatter fmt, const void *data,
+                          std::source_location loc = std::source_location::current()) noexcept {
+            return DefaultScopeCtx::template spanWithFormatter<Unique>(lvl, fmt, data, loc);
         }
 
-        void start(Start ev) { fstd_subscriber_start(*this, ev); }
-        void finish(Finish ev) { fstd_subscriber_finish(*this, ev); }
-        void registerThread(RegisterThread ev) { fstd_subscriber_register_thread(*this, ev); }
-        void unregisterThread(UnregisterThread ev) { fstd_subscriber_unregister_thread(*this, ev); }
-        void createCallStack(CreateCallStack ev) { fstd_subscriber_create_call_stack(*this, ev); }
-        void destroyCallStack(DestroyCallStack ev) { fstd_subscriber_destroy_call_stack(*this, ev); }
-        void unblockCallStack(UnblockCallStack ev) { fstd_subscriber_unblock_call_stack(*this, ev); }
-        void suspendCallStack(SuspendCallStack ev) { fstd_subscriber_suspend_call_stack(*this, ev); }
-        void resumeCallStack(ResumeCallStack ev) { fstd_subscriber_resume_call_stack(*this, ev); }
-        void enterSpan(EnterSpan ev) { fstd_subscriber_enter_span(*this, ev); }
-        void exitSpan(ExitSpan ev) { fstd_subscriber_exit_span(*this, ev); }
-        void logMessage(LogMessage ev) { fstd_subscriber_log_message(*this, ev); }
-        void declareEventInfo(DeclareEventInfo ev) { fstd_subscriber_declare_event_info(*this, ev); }
-        void startThread(StartThread ev) { fstd_subscriber_start_thread(*this, ev); }
-        void stopThread(StopThread ev) { fstd_subscriber_stop_thread(*this, ev); }
-        void loadImage(LoadImage ev) { fstd_subscriber_load_image(*this, ev); }
-        void unloadImage(UnloadImage ev) { fstd_subscriber_unload_image(*this, ev); }
-        void contextSwitch(ContextSwitch ev) { fstd_subscriber_context_switch(*this, ev); }
-        void threadWakeup(ThreadWakeup ev) { fstd_subscriber_thread_wakeup(*this, ev); }
-        void callStackSample(CallStackSample ev) { fstd_subscriber_call_stack_sample(*this, ev); }
-    };
+        struct Subscriber : FSTD_Subscriber {
+            using Type = Subscriber;
+            using FStd = FSTD_Subscriber;
+            constexpr Subscriber() noexcept = default;
+            constexpr Subscriber(const FStd &other) noexcept : FStd(other) {};
+            constexpr Subscriber(const Subscriber &other) noexcept = default;
+            constexpr Subscriber(Subscriber &&other) noexcept = default;
+            constexpr Subscriber &operator=(const Subscriber &other) noexcept = default;
+            constexpr Subscriber &operator=(Subscriber &&other) noexcept = default;
 
-    struct StdErrLogger : Subscriber {
-        static StdErrLogger init() noexcept { return {fstd_stderr_logger_init()}; }
-        void deinit() const noexcept { return fstd_stderr_logger_deinit(*this); }
-    };
+            using EventTag = FSTD_TracingEventTag;
+            using Start = FSTD_TracingEventStart;
+            using Finish = FSTD_TracingEventFinish;
+            using RegisterThread = FSTD_TracingEventRegisterThread;
+            using UnregisterThread = FSTD_TracingEventUnregisterThread;
+            using CreateCallStack = FSTD_TracingEventCreateCallStack;
+            using DestroyCallStack = FSTD_TracingEventDestroyCallStack;
+            using UnblockCallStack = FSTD_TracingEventUnblockCallStack;
+            using SuspendCallStack = FSTD_TracingEventSuspendCallStack;
+            using ResumeCallStack = FSTD_TracingEventResumeCallStack;
+            using EnterSpan = FSTD_TracingEventEnterSpan;
+            using ExitSpan = FSTD_TracingEventExitSpan;
+            using LogMessage = FSTD_TracingEventLogMessage;
+            using DeclareEventInfo = FSTD_TracingEventDeclareEventInfo;
+            using StartThread = FSTD_TracingEventStartThread;
+            using StopThread = FSTD_TracingEventStopThread;
+            using LoadImage = FSTD_TracingEventLoadImage;
+            using UnloadImage = FSTD_TracingEventUnloadImage;
+            using ContextSwitch = FSTD_TracingEventContextSwitch;
+            using ThreadWakeup = FSTD_TracingEventThreadWakeup;
+            using CallStackSample = FSTD_TracingEventCallStackSample;
 
-    struct CallStack {
-        using Type = CallStack;
-        using FStd = FSTD_CallStack *;
-        constexpr CallStack() noexcept = default;
-        constexpr CallStack(const FStd &other) noexcept : handle(other) {};
-        constexpr CallStack(const CallStack &other) noexcept = default;
-        constexpr CallStack(CallStack &&other) noexcept = default;
-        constexpr CallStack &operator=(const CallStack &other) noexcept = default;
-        constexpr CallStack &operator=(CallStack &&other) noexcept = default;
-        constexpr operator FSTD_CallStack *() const noexcept { return this->handle; };
+            template<typename T>
+            static Subscriber init(T &ptr) noexcept {
+                constexpr static auto on_event = +[](void *data, const EventTag *tag) {
+                    T &sub = *static_cast<T *>(data);
+                    switch (*tag) {
+                        case FSTD_TracingEventTag_Start: {
+                            if constexpr (requires { sub.onEvent(std::declval<Start>()); }) {
+                                const auto *event = fstd_parent_of_const(Start, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_Finish: {
+                            if constexpr (requires { sub.onEvent(std::declval<Finish>()); }) {
+                                const auto *event = fstd_parent_of_const(Finish, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_RegisterThread: {
+                            if constexpr (requires { sub.onEvent(std::declval<RegisterThread>()); }) {
+                                const auto *event = fstd_parent_of_const(RegisterThread, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_UnregisterThread: {
+                            if constexpr (requires { sub.onEvent(std::declval<UnregisterThread>()); }) {
+                                const auto *event = fstd_parent_of_const(UnregisterThread, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_CreateCallStack: {
+                            if constexpr (requires { sub.onEvent(std::declval<CreateCallStack>()); }) {
+                                const auto *event = fstd_parent_of_const(CreateCallStack, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_DestroyCallStack: {
+                            if constexpr (requires { sub.onEvent(std::declval<DestroyCallStack>()); }) {
+                                const auto *event = fstd_parent_of_const(DestroyCallStack, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_UnblockCallStack: {
+                            if constexpr (requires { sub.onEvent(std::declval<UnblockCallStack>()); }) {
+                                const auto *event = fstd_parent_of_const(UnblockCallStack, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_SuspendCallStack: {
+                            if constexpr (requires { sub.onEvent(std::declval<SuspendCallStack>()); }) {
+                                const auto *event = fstd_parent_of_const(SuspendCallStack, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_ResumeCallStack: {
+                            if constexpr (requires { sub.onEvent(std::declval<ResumeCallStack>()); }) {
+                                const auto *event = fstd_parent_of_const(ResumeCallStack, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_EnterSpan: {
+                            if constexpr (requires { sub.onEvent(std::declval<EnterSpan>()); }) {
+                                const auto *event = fstd_parent_of_const(EnterSpan, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_ExitSpan: {
+                            if constexpr (requires { sub.onEvent(std::declval<ExitSpan>()); }) {
+                                const auto *event = fstd_parent_of_const(ExitSpan, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_LogMessage: {
+                            if constexpr (requires { sub.onEvent(std::declval<LogMessage>()); }) {
+                                const auto *event = fstd_parent_of_const(LogMessage, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_DeclareEventInfo: {
+                            if constexpr (requires { sub.onEvent(std::declval<DeclareEventInfo>()); }) {
+                                const auto *event = fstd_parent_of_const(DeclareEventInfo, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_StartThread: {
+                            if constexpr (requires { sub.onEvent(std::declval<StartThread>()); }) {
+                                const auto *event = fstd_parent_of_const(StartThread, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_StopThread: {
+                            if constexpr (requires { sub.onEvent(std::declval<StopThread>()); }) {
+                                const auto *event = fstd_parent_of_const(StopThread, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_LoadImage: {
+                            if constexpr (requires { sub.onEvent(std::declval<LoadImage>()); }) {
+                                const auto *event = fstd_parent_of_const(LoadImage, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_UnloadImage: {
+                            if constexpr (requires { sub.onEvent(std::declval<UnloadImage>()); }) {
+                                const auto *event = fstd_parent_of_const(UnloadImage, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_ContextSwitch: {
+                            if constexpr (requires { sub.onEvent(std::declval<ContextSwitch>()); }) {
+                                const auto *event = fstd_parent_of_const(ContextSwitch, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_ThreadWakeup: {
+                            if constexpr (requires { sub.onEvent(std::declval<ThreadWakeup>()); }) {
+                                const auto *event = fstd_parent_of_const(ThreadWakeup, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        case FSTD_TracingEventTag_CallStackSample: {
+                            if constexpr (requires { sub.onEvent(std::declval<CallStackSample>()); }) {
+                                const auto *event = fstd_parent_of_const(CallStackSample, tag, &sub);
+                                sub.onEvent(*event);
+                            }
+                        } break;
+                        default:
+                            break;
+                    }
+                };
 
-        FSTD_CallStack *handle;
+                return FSTD_Subscriber{
+                        .data = &ptr,
+                        .on_event = nullptr,
+                };
+            }
 
-        static CallStack init() noexcept { return fstd_call_stack_init(); }
-        void finish() const noexcept { return fstd_call_stack_finish(this->handle); }
-        void abort() const noexcept { return fstd_call_stack_abort(this->handle); }
-        CallStack replaceCurrent() const noexcept { return fstd_call_stack_replace_current(this->handle); }
-        void unblock() const noexcept { return fstd_call_stack_unblock(this->handle); }
-        static void suspendCurrent(bool mark_blocked) noexcept { fstd_call_stack_suspend_current(mark_blocked); }
-        static void resumeCurrent() noexcept { fstd_call_stack_resume_current(); }
-    };
+            void start(Start ev) { fstd_subscriber_start(*this, ev); }
+            void finish(Finish ev) { fstd_subscriber_finish(*this, ev); }
+            void registerThread(RegisterThread ev) { fstd_subscriber_register_thread(*this, ev); }
+            void unregisterThread(UnregisterThread ev) { fstd_subscriber_unregister_thread(*this, ev); }
+            void createCallStack(CreateCallStack ev) { fstd_subscriber_create_call_stack(*this, ev); }
+            void destroyCallStack(DestroyCallStack ev) { fstd_subscriber_destroy_call_stack(*this, ev); }
+            void unblockCallStack(UnblockCallStack ev) { fstd_subscriber_unblock_call_stack(*this, ev); }
+            void suspendCallStack(SuspendCallStack ev) { fstd_subscriber_suspend_call_stack(*this, ev); }
+            void resumeCallStack(ResumeCallStack ev) { fstd_subscriber_resume_call_stack(*this, ev); }
+            void enterSpan(EnterSpan ev) { fstd_subscriber_enter_span(*this, ev); }
+            void exitSpan(ExitSpan ev) { fstd_subscriber_exit_span(*this, ev); }
+            void logMessage(LogMessage ev) { fstd_subscriber_log_message(*this, ev); }
+            void declareEventInfo(DeclareEventInfo ev) { fstd_subscriber_declare_event_info(*this, ev); }
+            void startThread(StartThread ev) { fstd_subscriber_start_thread(*this, ev); }
+            void stopThread(StopThread ev) { fstd_subscriber_stop_thread(*this, ev); }
+            void loadImage(LoadImage ev) { fstd_subscriber_load_image(*this, ev); }
+            void unloadImage(UnloadImage ev) { fstd_subscriber_unload_image(*this, ev); }
+            void contextSwitch(ContextSwitch ev) { fstd_subscriber_context_switch(*this, ev); }
+            void threadWakeup(ThreadWakeup ev) { fstd_subscriber_thread_wakeup(*this, ev); }
+            void callStackSample(CallStackSample ev) { fstd_subscriber_call_stack_sample(*this, ev); }
+        };
 
-    struct TracingCfg : FSTD_TracingCfg {
-        using Type = TracingCfg;
-        using FStd = FSTD_TracingCfg;
-        constexpr TracingCfg() noexcept :
-            FStd{
-                    .id = {.id = static_cast<FSTD_CfgId>(CfgId::Tracing)},
-                    .format_buffer_len = 0,
-                    .max_level = static_cast<FSTD_TracingLevel>(TracingMaxLevel),
-                    .subscribers = {},
-                    .register_thread = true,
-                    .app_name = {},
-            } {}
-        constexpr TracingCfg(usize format_buffer_len, TracingLevel max_level, Slice<const Subscriber> subscribers,
-                             bool register_thread, Slice<const char> app_name) noexcept :
-            FStd{
-                    .id = {.id = static_cast<FSTD_CfgId>(CfgId::Tracing)},
-                    .format_buffer_len = format_buffer_len,
-                    .max_level = static_cast<FSTD_TracingLevel>(max_level),
-                    .subscribers = subscribers,
-                    .register_thread = register_thread,
-                    .app_name = app_name,
-            } {};
-        constexpr TracingCfg(const FStd &other) noexcept : FStd(other) {};
-        constexpr TracingCfg(const TracingCfg &other) noexcept = default;
-        constexpr TracingCfg(TracingCfg &&other) noexcept = default;
-        constexpr TracingCfg &operator=(const TracingCfg &other) noexcept = default;
-        constexpr TracingCfg &operator=(TracingCfg &&other) noexcept = default;
-    };
+        struct StdErrLogger : Subscriber {
+            static StdErrLogger init() noexcept { return {fstd_stderr_logger_init()}; }
+            void deinit() const noexcept { return fstd_stderr_logger_deinit(*this); }
+        };
 
-    struct Tracing {
-        static bool isEnabled() noexcept { return fstd_tracing_is_enabled(); }
-        static void registerThread() noexcept { return fstd_tracing_register_thread(); }
-        static void unregisterThread() noexcept { return fstd_tracing_unregister_thread(); }
-    };
+        struct CallStack {
+            using Type = CallStack;
+            using FStd = FSTD_CallStack *;
+            constexpr CallStack() noexcept = default;
+            constexpr CallStack(const FStd &other) noexcept : handle(other) {};
+            constexpr CallStack(const CallStack &other) noexcept = default;
+            constexpr CallStack(CallStack &&other) noexcept = default;
+            constexpr CallStack &operator=(const CallStack &other) noexcept = default;
+            constexpr CallStack &operator=(CallStack &&other) noexcept = default;
+            constexpr operator FSTD_CallStack *() const noexcept { return this->handle; };
+
+            FSTD_CallStack *handle;
+
+            static CallStack init() noexcept { return fstd_call_stack_init(); }
+            void finish() const noexcept { return fstd_call_stack_finish(this->handle); }
+            void abort() const noexcept { return fstd_call_stack_abort(this->handle); }
+            CallStack replaceCurrent() const noexcept { return fstd_call_stack_replace_current(this->handle); }
+            void unblock() const noexcept { return fstd_call_stack_unblock(this->handle); }
+            static void suspendCurrent(bool mark_blocked) noexcept { fstd_call_stack_suspend_current(mark_blocked); }
+            static void resumeCurrent() noexcept { fstd_call_stack_resume_current(); }
+        };
+
+        struct Cfg : FSTD_TracingCfg {
+            using Type = Cfg;
+            using FStd = FSTD_TracingCfg;
+            constexpr Cfg() noexcept : Cfg(0, DefaultMaxLevel, {}, true, "") {}
+            constexpr Cfg(usize format_buffer_len, Level max_level, Slice<const Subscriber> subscribers,
+                          bool register_thread, Slice<const char> app_name) noexcept :
+                FStd{
+                        .id = {.id = static_cast<FSTD_CfgId>(CfgId::Tracing)},
+                        .format_buffer_len = format_buffer_len,
+                        .max_level = static_cast<FSTD_TracingLevel>(max_level),
+                        .subscribers = subscribers,
+                        .register_thread = register_thread,
+                        .app_name = app_name,
+                } {};
+            constexpr Cfg(const FStd &other) noexcept : FStd(other) {};
+            constexpr Cfg(const Cfg &other) noexcept = default;
+            constexpr Cfg(Cfg &&other) noexcept = default;
+            constexpr Cfg &operator=(const Cfg &other) noexcept = default;
+            constexpr Cfg &operator=(Cfg &&other) noexcept = default;
+        };
+
+        inline static bool isEnabled() noexcept { return fstd_tracing_is_enabled(); }
+        inline static void registerThread() noexcept { return fstd_tracing_register_thread(); }
+        inline static void unregisterThread() noexcept { return fstd_tracing_unregister_thread(); }
+    } // namespace tracing
 
     // -----------------------------------------
     // modules subsystem -----------------------
@@ -5705,7 +6147,7 @@ fstd_func_impl void fstd_tracing_unregister_thread(void) {
     handle->tracing_v0.unregister_thread();
 }
 
-fstd_func_impl void fstd_tracing_enter_span(const FSTD_TracingEventInfo *info, fstd_tracing_fmt_fn fmt,
+fstd_func_impl void fstd_tracing_enter_span(const FSTD_TracingEventInfo *info, FSTD_TracingFmtFn fmt,
                                             const void *fmt_data) {
     FSTD_Ctx *handle = fstd_ctx_get();
     handle->tracing_v0.enter_span(info, fmt, fmt_data);
@@ -5716,7 +6158,7 @@ fstd_func_impl void fstd_tracing_exit_span(const FSTD_TracingEventInfo *info) {
     handle->tracing_v0.exit_span(info);
 }
 
-fstd_func_impl void fstd_tracing_log_message(const FSTD_TracingEventInfo *info, fstd_tracing_fmt_fn fmt,
+fstd_func_impl void fstd_tracing_log_message(const FSTD_TracingEventInfo *info, FSTD_TracingFmtFn fmt,
                                              const void *fmt_data) {
     FSTD_Ctx *handle = fstd_ctx_get();
     handle->tracing_v0.log_message(info, fmt, fmt_data);
