@@ -1,6 +1,5 @@
 const std = @import("std");
 
-pub const c = @import("c");
 const fimo_std = @import("fimo_std");
 const Error = fimo_std.ctx.Error;
 const memory = fimo_std.memory;

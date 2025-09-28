@@ -244,6 +244,32 @@ FSTD_SYM_FN(FWRLD_Sym_SysDeinit, FWRLD__SYM_ID("sys_deinit"), void, FWRLD_Sys sy
 #include <tuple>
 
 namespace fworlds {
+    namespace sym {
+        constexpr static auto Namespace = FWRLD_SYM_NS;
+        constexpr static fstd::Version SymVersion = {FSTD_CTX_VERSION};
+        constexpr static auto WorldInit = FWRLD_Sym_WorldInit__Cxx;
+        constexpr static auto WorldDeinit = FWRLD_Sym_WorldDeinit__Cxx;
+        constexpr static auto WorldAddRes = FWRLD_Sym_WorldAddRes__Cxx;
+        constexpr static auto WorldAddScheduler = FWRLD_Sym_WorldAddScheduler__Cxx;
+        constexpr static auto ResourceDeinit = FWRLD_Sym_ResourceDeinit__Cxx;
+        constexpr static auto ResourceLockRead = FWRLD_Sym_ResourceLockRead__Cxx;
+        constexpr static auto ResourceUnlockRead = FWRLD_Sym_ResourceUnlockRead__Cxx;
+        constexpr static auto ResourceLockWrite = FWRLD_Sym_ResourceLockWrite__Cxx;
+        constexpr static auto ResourceUnlockWrite = FWRLD_Sym_ResourceUnlockWrite__Cxx;
+        constexpr static auto SchedulerDeinit = FWRLD_Sym_SchedulerDeinit__Cxx;
+        constexpr static auto SchedulerAddSys = FWRLD_Sym_SchedulerAddSys__Cxx;
+        constexpr static auto SchedulerRun = FWRLD_Sym_SchedulerRun__Cxx;
+        constexpr static auto SchedulerSchedule = FWRLD_Sym_SchedulerSchedule__Cxx;
+        constexpr static auto SchedulerFlush = FWRLD_Sym_SchedulerFlush__Cxx;
+        constexpr static auto SysDeinit = FWRLD_Sym_SysDeinit__Cxx;
+
+        constexpr static auto AllSymbols = fstd::modules::SymbolImportList{
+                WorldInit,        WorldDeinit,        WorldAddRes,       WorldAddScheduler,   ResourceDeinit,
+                ResourceLockRead, ResourceUnlockRead, ResourceLockWrite, ResourceUnlockWrite, SchedulerDeinit,
+                SchedulerAddSys,  SchedulerRun,       SchedulerSchedule, SchedulerFlush,      SysDeinit,
+        };
+    } // namespace sym
+
     /// Descriptor for a resource.
     struct WorldDesc {
         /// Optional label of the world.

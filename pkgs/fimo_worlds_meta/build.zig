@@ -7,15 +7,6 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
     const fimo_std_pkg = builder.getPackage("fimo_std");
     const fimo_tasks_pkg = builder.getPackage("fimo_tasks_meta");
 
-    const translate_c = b.addTranslateC(.{
-        .root_source_file = b.path("fimo_worlds.h"),
-        .target = builder.graph.target,
-        .optimize = builder.graph.optimize,
-    });
-    translate_c.addIncludePath(fimo_std_pkg.headers.?);
-    translate_c.addIncludePath(fimo_tasks_pkg.headers.?);
-    const module_c = translate_c.createModule();
-
     const module = b.addModule("fimo_worlds_meta", .{
         .root_source_file = b.path("src/root.zig"),
         .target = builder.graph.target,
@@ -23,7 +14,6 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
     });
     module.addImport("fimo_std", fimo_std_pkg.root_module);
     module.addImport("fimo_tasks_meta", fimo_tasks_pkg.root_module);
-    module.addImport("c", module_c);
 
     const pkg = builder.addPackage(.{
         .name = "fimo_worlds_meta",
@@ -42,7 +32,6 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
     });
     test_module.addImport("fimo_std", fimo_std_pkg.root_module);
     test_module.addImport("fimo_tasks_meta", fimo_tasks_pkg.root_module);
-    test_module.addImport("c", module_c);
 
     _ = pkg.addTest(.{
         .name = "fimo_worlds_meta_test",

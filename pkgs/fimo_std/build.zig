@@ -15,19 +15,13 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
     // const lz4 = lz4_dependency.artifact("lz4");
     // _ = lz4; // autofix
 
-    const wf = b.addWriteFiles();
-    const context_version = generateVersion(b, wf);
+    const options = b.addOptions();
+    options.addOption(std.SemanticVersion, "version", build_internals.fimo_version);
+    const context_version = options.createModule();
 
     const headers = b.addWriteFiles();
     _ = headers.addCopyFile(b.path("fimo_std.h"), "fimo_std.h");
     _ = headers.addCopyFile(b.path("NOTICES"), "FIMO_STD_NOTICES");
-
-    const translate_c = b.addTranslateC(.{
-        .root_source_file = headers.getDirectory().path(b, "fimo_std.h"),
-        .target = target,
-        .optimize = optimize,
-    });
-    translate_c.addIncludePath(headers.getDirectory());
 
     const module = b.addModule("fimo_std", .{
         .root_source_file = b.path("src/root.zig"),
@@ -36,7 +30,6 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
         .link_libc = true,
         .pic = true,
     });
-    module.addImport("c", translate_c.createModule());
     module.addImport("context_version", context_version);
     module.addIncludePath(headers.getDirectory());
     if (target.result.os.tag == .windows) {
@@ -62,7 +55,6 @@ pub fn configure(builder: *build_internals.FimoBuild) void {
                     .link_libc = true,
                     .pic = true,
                 });
-                t.addImport("c", translate_c.createModule());
                 t.addImport("context_version", context_version);
                 t.addIncludePath(headers.getDirectory());
                 t.addImport("fimo_std", t);
@@ -163,34 +155,4 @@ pub fn build(b: *std.Build) void {
     if (build_dynamic) b.installArtifact(dynamic_lib);
 
     check_step.dependOn(&static_lib.step);
-}
-
-fn generateVersion(
-    b: *std.Build,
-    wf: *std.Build.Step.WriteFile,
-) *std.Build.Module {
-    const header_contents = b.fmt(
-        \\ // Machine generated
-        \\ #define FIMO_CONTEXT_VERSION_MAJOR {}
-        \\ #define FIMO_CONTEXT_VERSION_MINOR {}
-        \\ #define FIMO_CONTEXT_VERSION_PATCH {}
-        \\ #define FIMO_CONTEXT_VERSION_PRE "{s}"
-        \\ #define FIMO_CONTEXT_VERSION_PRE_LEN {}
-        \\ #define FIMO_CONTEXT_VERSION_BUILD "{s}"
-        \\ #define FIMO_CONTEXT_VERSION_BUILD_LEN {}
-        \\
-    , .{
-        build_internals.fimo_version.major,
-        build_internals.fimo_version.minor,
-        build_internals.fimo_version.patch,
-        build_internals.fimo_version.pre orelse "",
-        (build_internals.fimo_version.pre orelse "").len,
-        build_internals.fimo_version.build orelse "",
-        (build_internals.fimo_version.build orelse "").len,
-    });
-    _ = wf.add("include/fimo_std/impl/context_version_.h", header_contents);
-
-    const options = b.addOptions();
-    options.addOption(std.SemanticVersion, "version", build_internals.fimo_version);
-    return options.createModule();
 }

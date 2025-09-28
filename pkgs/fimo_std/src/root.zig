@@ -1,8 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-pub const c = @import("c");
-
 pub const AnyError = @import("AnyError.zig");
 const context = @import("context.zig");
 pub const ctx = @import("ctx.zig");

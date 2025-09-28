@@ -704,6 +704,68 @@ FSTD_SYM_FN(FTSK_Sym_FutexRequeue, FTSK__SYM_ID("futex_requeue"), FTSK_FutexStat
 }
 #endif
 
+#ifdef __cplusplus
+namespace ftasks {
+    namespace sym {
+        constexpr static auto Namespace = FTSK_SYM_NS;
+        constexpr static fstd::Version SymVersion = {FSTD_CTX_VERSION};
+        constexpr static auto TaskId = FTSK_Sym_TaskId__Cxx;
+        constexpr static auto WorkerId = FTSK_Sym_WorkerId__Cxx;
+        constexpr static auto Yield = FTSK_Sym_Yield__Cxx;
+        constexpr static auto Abort = FTSK_Sym_Abort__Cxx;
+        constexpr static auto CancelRequested = FTSK_Sym_CancelRequested__Cxx;
+        constexpr static auto Sleep = FTSK_Sym_Sleep__Cxx;
+        constexpr static auto TaskArena = FTSK_Sym_TaskArena__Cxx;
+        constexpr static auto TaskLocalSet = FTSK_Sym_TaskLocalSet__Cxx;
+        constexpr static auto TaskLocalGet = FTSK_Sym_TaskLocalGet__Cxx;
+        constexpr static auto TaskLocalClear = FTSK_Sym_TaskLocalClear__Cxx;
+        constexpr static auto CmdBufJoin = FTSK_Sym_CmdBufJoin__Cxx;
+        constexpr static auto CmdBufDetach = FTSK_Sym_CmdBufDetach__Cxx;
+        constexpr static auto CmdBufCancel = FTSK_Sym_CmdBufCancel__Cxx;
+        constexpr static auto CmdBufCancelDetach = FTSK_Sym_CmdBufCancelDetach__Cxx;
+        constexpr static auto ExecutorGlobal = FTSK_Sym_ExecutorGlobal__Cxx;
+        constexpr static auto ExecutorInit = FTSK_Sym_ExecutorInit__Cxx;
+        constexpr static auto ExecutorCurrent = FTSK_Sym_ExecutorCurrent__Cxx;
+        constexpr static auto ExecutorJoin = FTSK_Sym_ExecutorJoin__Cxx;
+        constexpr static auto ExecutorJoinRequested = FTSK_Sym_ExecutorJoinRequested__Cxx;
+        constexpr static auto ExecutorEnqueue = FTSK_Sym_ExecutorEnqueue__Cxx;
+        constexpr static auto ExecutorEnqueueDetached = FTSK_Sym_ExecutorEnqueueDetached__Cxx;
+        constexpr static auto FutexWait = FTSK_Sym_FutexWait__Cxx;
+        constexpr static auto FutexWaitv = FTSK_Sym_FutexWaitv__Cxx;
+        constexpr static auto FutexWake = FTSK_Sym_FutexWake__Cxx;
+        constexpr static auto FutexRequeue = FTSK_Sym_FutexRequeue__Cxx;
+
+        constexpr static auto AllSymbols = fstd::modules::SymbolImportList{
+                TaskId,
+                WorkerId,
+                Yield,
+                Abort,
+                CancelRequested,
+                Sleep,
+                TaskArena,
+                TaskLocalSet,
+                TaskLocalGet,
+                TaskLocalClear,
+                CmdBufJoin,
+                CmdBufDetach,
+                CmdBufCancel,
+                CmdBufCancelDetach,
+                ExecutorGlobal,
+                ExecutorInit,
+                ExecutorCurrent,
+                ExecutorJoin,
+                ExecutorJoinRequested,
+                ExecutorEnqueue,
+                ExecutorEnqueueDetached,
+                FutexWait,
+                FutexWaitv,
+                FutexWake,
+                FutexRequeue,
+        };
+    } // namespace sym
+} // namespace ftasks
+#endif
+
 #ifdef FIMO_TASKS_IMPLEMENTATION
 
 #ifdef __cplusplus

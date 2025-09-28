@@ -1,7 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-pub const c = @import("c");
 const fimo_std = @import("fimo_std");
 const Arena = fimo_std.memory.Arena;
 const Error = fimo_std.ctx.Error;
