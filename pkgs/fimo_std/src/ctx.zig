@@ -39,10 +39,6 @@ pub const Status = enum(i32) {
     ///
     /// The specific error may be accessible through the context.
     err = -1,
-    /// Operation failed with an unspecified error.
-    ///
-    /// No error was provided to the context.
-    err_no_report = -2,
     _,
 
     /// Checks if the status indicates a success.
@@ -60,7 +56,6 @@ pub const Status = enum(i32) {
         if (self.isOk()) return;
         return switch (self) {
             .err => error.OperationFailed,
-            .err_no_report => error.OperationFailedWithoutReport,
             else => error.UnknownError,
         };
     }
@@ -69,7 +64,6 @@ pub const Status = enum(i32) {
 /// Error type of the context.
 pub const Error = error{
     OperationFailed,
-    OperationFailedWithoutReport,
     UnknownError,
 };
 

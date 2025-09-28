@@ -403,121 +403,137 @@ pub fn Module(T: type) type {
 
             if (!@hasField(@TypeOf(exp), "value")) @compileError("fimo: invalid export value, expected `pub const fimo_exports = .{ .exp = .{ .value = ..., ... }, ... };` declaration, found: " ++ @typeName(@TypeOf(exp)));
             const value = exp.value;
-            if (@typeInfo(@TypeOf(value)) == .pointer) {
-                if (@TypeOf(value) != *const symbol.T) @compileError("fimo: invalid export value, expected `" ++ @typeName(*const symbol.T) ++ "`, found " ++ @typeName(@TypeOf(value)));
-                export_infos = export_infos ++ [_]SymbolExport{.{
-                    .symbol = .fromSymbol(symbol),
-                    .sym_ty = .static,
-                    .linkage = linkage,
-                    .value = .{ .static = value },
-                }};
-            } else {
-                const wrapper = struct {
-                    const Sync = struct {
-                        const Result = @typeInfo(@TypeOf(value.init)).@"fn".return_type.?;
-                        fn pollInit(inst: *modules.OpaqueInstance, waker: tasks.Waker, result: *tasks.Fallible(*anyopaque)) callconv(.c) bool {
-                            _ = inst;
-                            _ = waker;
-                            const sym: *symbol.T = if (@typeInfo(Result) == .error_union)
-                                value.init() catch |err| {
-                                    result.* = .wrap(err);
-                                    return true;
-                                }
-                            else
-                                value.init();
-                            result.* = .wrap(sym);
-                            return true;
-                        }
-                        fn pollDeinit(inst: *modules.OpaqueInstance, waker: tasks.Waker, val: *anyopaque) callconv(.c) bool {
-                            _ = inst;
-                            _ = waker;
-                            if (comptime @hasField(@TypeOf(value), "deinit")) {
-                                const f: fn (*symbol.T) void = value.deinit;
-                                f(val);
-                            }
-                            return true;
-                        }
-                    };
-                    const AsyncInit = struct {
-                        const Inner = @typeInfo(@TypeOf(value.init)).@"fn".return_type.?;
-                        const Result = Inner.Result;
-                        comptime {
-                            if (Inner.Result != *symbol.T) switch (@typeInfo(Inner.Result)) {
-                                .error_union => |v| {
-                                    if (Inner.Result != v.error_set!*symbol.T) @compileError("fimo: invalid init return type, expected `*T` or `err!*T`, found " ++ @typeName(Inner.Result));
-                                },
-                                else => @compileError("fimo: invalid init return type, expected `*T` or `err!*T`, found " ++ @typeName(Inner.Result)),
-                            };
-                        }
-
-                        var future: ?Inner = null;
-                        fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker, result: *tasks.Fallible(*anyopaque)) callconv(.c) bool {
-                            _ = inst;
-                            if (future == null) future = value.init();
-                            if (future) |*fut| {
-                                switch (fut.poll(waker)) {
-                                    .ready => |v| {
-                                        future = null;
-                                        const sym: *symbol.T = if (@typeInfo(Result) == .error_union)
-                                            v catch |err| {
-                                                result.* = .wrap(err);
-                                                return true;
-                                            }
-                                        else
-                                            v;
-                                        result.* = .wrap(sym);
+            switch (@typeInfo(@TypeOf(value))) {
+                .pointer => {
+                    if (@TypeOf(value) != *const symbol.T) @compileError("fimo: invalid export value, expected `" ++ @typeName(*const symbol.T) ++ "`, found " ++ @typeName(@TypeOf(value)));
+                    export_infos = export_infos ++ [_]SymbolExport{.{
+                        .symbol = .fromSymbol(symbol),
+                        .sym_ty = .static,
+                        .linkage = linkage,
+                        .value = .{ .static = value },
+                    }};
+                },
+                .enum_literal => {
+                    const field_name = @tagName(value);
+                    if (!@hasField(T, field_name)) @compileError("fimo: invalid export offset, specified unknown field: " ++ field_name);
+                    if (@FieldType(T, field_name) != symbol.T) @compileError("fimo: invalid export value at field `" ++ field_name ++ "`, expected " ++ @typeName(symbol.T) ++ "`, found " ++ @FieldType(T, field_name));
+                    const field_offset = @offsetOf(T, field_name);
+                    export_infos = export_infos ++ [_]SymbolExport{.{
+                        .symbol = .fromSymbol(symbol),
+                        .sym_ty = .state_offset,
+                        .linkage = linkage,
+                        .value = .{ .state_offset = field_offset },
+                    }};
+                },
+                .@"struct" => {
+                    const wrapper = struct {
+                        const Sync = struct {
+                            const Result = @typeInfo(@TypeOf(value.init)).@"fn".return_type.?;
+                            fn pollInit(inst: *modules.OpaqueInstance, waker: tasks.Waker, result: *tasks.Fallible(*anyopaque)) callconv(.c) bool {
+                                _ = inst;
+                                _ = waker;
+                                const sym: *symbol.T = if (@typeInfo(Result) == .error_union)
+                                    value.init() catch |err| {
+                                        result.* = .wrap(err);
                                         return true;
+                                    }
+                                else
+                                    value.init();
+                                result.* = .wrap(sym);
+                                return true;
+                            }
+                            fn pollDeinit(inst: *modules.OpaqueInstance, waker: tasks.Waker, val: *anyopaque) callconv(.c) bool {
+                                _ = inst;
+                                _ = waker;
+                                if (comptime @hasField(@TypeOf(value), "deinit")) {
+                                    const f: fn (*symbol.T) void = value.deinit;
+                                    f(val);
+                                }
+                                return true;
+                            }
+                        };
+                        const AsyncInit = struct {
+                            const Inner = @typeInfo(@TypeOf(value.init)).@"fn".return_type.?;
+                            const Result = Inner.Result;
+                            comptime {
+                                if (Inner.Result != *symbol.T) switch (@typeInfo(Inner.Result)) {
+                                    .error_union => |v| {
+                                        if (Inner.Result != v.error_set!*symbol.T) @compileError("fimo: invalid init return type, expected `*T` or `err!*T`, found " ++ @typeName(Inner.Result));
                                     },
-                                    .pending => return false,
+                                    else => @compileError("fimo: invalid init return type, expected `*T` or `err!*T`, found " ++ @typeName(Inner.Result)),
+                                };
+                            }
+
+                            var future: ?Inner = null;
+                            fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker, result: *tasks.Fallible(*anyopaque)) callconv(.c) bool {
+                                _ = inst;
+                                if (future == null) future = value.init();
+                                if (future) |*fut| {
+                                    switch (fut.poll(waker)) {
+                                        .ready => |v| {
+                                            future = null;
+                                            const sym: *symbol.T = if (@typeInfo(Result) == .error_union)
+                                                v catch |err| {
+                                                    result.* = .wrap(err);
+                                                    return true;
+                                                }
+                                            else
+                                                v;
+                                            result.* = .wrap(sym);
+                                            return true;
+                                        },
+                                        .pending => return false,
+                                    }
                                 }
                             }
-                        }
-                    };
-                    const AsyncDeinit = struct {
-                        const Inner = @typeInfo(@TypeOf(value.deinit)).@"fn".return_type.?;
-                        const Result = Inner.Result;
-                        comptime {
-                            if (Inner.Result != void) @compileError("fimo: invalid deinit return type, expected `void`, found " ++ @typeName(Inner.Result));
-                        }
-
-                        var future: ?Inner = null;
-                        fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker, val: *anyopaque) callconv(.c) bool {
-                            _ = inst;
-                            _ = val;
-                            if (future == null) {
-                                future = value.deinit();
+                        };
+                        const AsyncDeinit = struct {
+                            const Inner = @typeInfo(@TypeOf(value.deinit)).@"fn".return_type.?;
+                            const Result = Inner.Result;
+                            comptime {
+                                if (Inner.Result != void) @compileError("fimo: invalid deinit return type, expected `void`, found " ++ @typeName(Inner.Result));
                             }
-                            if (future) |*fut| {
-                                switch (fut.poll(waker)) {
-                                    .ready => {
-                                        future = null;
-                                        return true;
-                                    },
-                                    .pending => return false,
+
+                            var future: ?Inner = null;
+                            fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker, val: *anyopaque) callconv(.c) bool {
+                                _ = inst;
+                                _ = val;
+                                if (future == null) {
+                                    future = value.deinit();
+                                }
+                                if (future) |*fut| {
+                                    switch (fut.poll(waker)) {
+                                        .ready => {
+                                            future = null;
+                                            return true;
+                                        },
+                                        .pending => return false,
+                                    }
                                 }
                             }
-                        }
+                        };
                     };
-                };
 
-                const init_fn = if (comptime @typeInfo(@TypeOf(value.init)) == .@"fn")
-                    &wrapper.Sync.pollInit
-                else
-                    &wrapper.AsyncInit.poll;
-                const deinit_fn = if (comptime !@hasField(@TypeOf(value), "deinit") or @typeInfo(@TypeOf(value.deinit)) == .@"fn")
-                    &wrapper.Sync.pollDeinit
-                else
-                    &wrapper.AsyncDeinit.poll;
+                    const init_fn = if (comptime @typeInfo(@TypeOf(value.init)) == .@"fn")
+                        &wrapper.Sync.pollInit
+                    else
+                        &wrapper.AsyncInit.poll;
+                    const deinit_fn = if (comptime !@hasField(@TypeOf(value), "deinit") or @typeInfo(@TypeOf(value.deinit)) == .@"fn")
+                        &wrapper.Sync.pollDeinit
+                    else
+                        &wrapper.AsyncDeinit.poll;
 
-                export_infos = export_infos ++ [_]SymbolExport{.{
-                    .symbol = .fromSymbol(symbol),
-                    .sym_ty = .dynamic,
-                    .linkage = linkage,
-                    .value = .{ .dynamic = .{
-                        .poll_init = init_fn,
-                        .poll_deinit = deinit_fn,
-                    } },
-                }};
+                    export_infos = export_infos ++ [_]SymbolExport{.{
+                        .symbol = .fromSymbol(symbol),
+                        .sym_ty = .dynamic,
+                        .linkage = linkage,
+                        .value = .{ .dynamic = .{
+                            .poll_init = init_fn,
+                            .poll_deinit = deinit_fn,
+                        } },
+                    }};
+                },
+                else => @compileError("fimo: invalid export value type, expected pointer, enum literal, or struct, found: " ++ @tagName(@typeInfo(@TypeOf(value)))),
             }
         }
     }

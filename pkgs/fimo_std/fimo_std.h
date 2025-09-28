@@ -890,7 +890,6 @@ typedef FSTD_I32 FSTD_Status;
 enum {
     FSTD_Status_Ok = (FSTD_Status)0,
     FSTD_Status_Failure = (FSTD_Status)-1,
-    FSTD_Status_FailureNoReport = (FSTD_Status)-2,
     FSTD__Status_ = FSTD_I32_MAX,
 };
 
@@ -4333,7 +4332,6 @@ namespace fstd {
     enum class Status : FSTD_Status {
         Ok = FSTD_Status_Ok,
         Failure = FSTD_Status_Failure,
-        FailureUnknown = FSTD_Status_FailureNoReport,
     };
 
     enum class PlatformError : FSTD_PlatformError {};
@@ -4341,7 +4339,7 @@ namespace fstd {
     struct Result : FSTD_Result {
         using Type = Result;
         using FStd = FSTD_Result;
-        constexpr Result() noexcept = default;
+        constexpr Result() noexcept : Result(FSTD_Result_Ok) {};
         constexpr Result(const FStd &other) noexcept : FStd(other) {};
         constexpr Result(const Result &other) noexcept = default;
         constexpr Result(Result &&other) noexcept = default;
@@ -4349,12 +4347,34 @@ namespace fstd {
         constexpr Result &operator=(Result &&other) noexcept = default;
 
         template<typename T>
-        static Result init(T) noexcept;
+        constexpr static Result init(T) noexcept;
         static Result initPlatformError(FSTD_PlatformError err) noexcept {
             return fstd_result_init_platform_error(err);
         }
         static Result initPlatformError(PlatformError err) noexcept {
             return initPlatformError(static_cast<FSTD_PlatformError>(err));
+        }
+        template<detail::ConstString String>
+        static consteval Result initStaticStr() noexcept {
+            constexpr static StrConst StringSlice = String.str;
+            constexpr static FSTD_ResultVtable VTable = {
+                    .cls = {},
+                    .deinit = nullptr,
+                    .write =
+                            [](void *, FSTD_Str dst, usize offset, usize *remaining) {
+                                fstd_dbg_assert(offset <= StringSlice.size());
+                                Slice<char> destination = {dst.ptr, dst.len};
+                                StrConst sub_str = {StringSlice.begin() + offset, StringSlice.size() - offset};
+                                usize writable = FSTD__MIN(destination.size(), sub_str.size());
+                                std::copy_n(sub_str.begin(), writable, destination.begin());
+                                *remaining = sub_str.size() - writable;
+                                return writable;
+                            },
+            };
+            return FSTD_Result{
+                    .data = nullptr,
+                    .vtable = &VTable,
+            };
         }
         void deinit() noexcept {
             if (this->vtable)
@@ -4366,7 +4386,6 @@ namespace fstd {
             return fstd_result_write(*this, dst, offset, &remaining);
         }
     };
-    constexpr static Result ResultOk = FSTD_Result_Ok;
 
     template<>
     inline Result Result::init(PlatformError err) noexcept {
@@ -6587,300 +6606,297 @@ namespace fstd {
             Slice<const FSTD_ModuleSymbolExt> imports;
             detail::ConstUnknownSlice exports;
             void (*on_event)(const FSTD_ModuleExport *module, FSTD_ModuleExportEventTag *tag);
-
-            template<typename T>
-            static consteval auto createModule() {
-                constexpr static StrConst Name = T::Name;
-                constexpr static StrConst Description = []() -> StrConst {
-                    if constexpr (requires { T::Description; }) {
-                        return T::Description;
-                    }
-                    else {
-                        return "";
-                    }
-                }();
-                constexpr static StrConst Author = []() -> StrConst {
-                    if constexpr (requires { T::Author; }) {
-                        return T::Author;
-                    }
-                    else {
-                        return "";
-                    }
-                }();
-                constexpr static StrConst License = []() -> StrConst {
-                    if constexpr (requires { T::License; }) {
-                        return T::License;
-                    }
-                    else {
-                        return "";
-                    }
-                }();
-                constexpr static auto Resources = [] {
-                    if constexpr (requires { T::Resources; }) {
-                        return T::Resources;
-                    }
-                    else {
-                        return std::array<Path, 0>{};
-                    }
-                }();
-                constexpr static auto NumNamespaces = [] -> usize {
-                    usize count = 0;
-                    if constexpr (requires { T::Imports; }) {
-                        for (usize i = 0; i < T::Imports.NumImports; i++) {
-                            StrConst ns = T::Imports.arr[i].id.ns;
-                            if (ns.empty())
-                                continue;
-                            bool found = false;
-                            for (usize j = 0; j < i; j++) {
-                                StrConst other = T::Imports.arr[j].id.ns;
-                                if (ns == other) {
-                                    found = true;
-                                    break;
-                                }
-                            }
-                            if (!found)
-                                count++;
-                        }
-                    }
-                    return count;
-                }();
-                constexpr static auto Namespaces = [] {
-                    usize next = 0;
-                    std::array<StrConst, NumNamespaces> namespaces{};
-                    if constexpr (requires { T::Imports; }) {
-                        for (usize i = 0; i < T::Imports.NumImports; i++) {
-                            StrConst ns = T::Imports.arr[i].id.ns;
-                            if (ns.empty())
-                                continue;
-                            bool found = false;
-                            for (usize j = 0; j < i; j++) {
-                                StrConst other = T::Imports.arr[j].id.ns;
-                                if (ns == other) {
-                                    found = true;
-                                    break;
-                                }
-                            }
-                            if (!found) {
-                                namespaces[next] = ns;
-                                next++;
-                            }
-                        }
-                    }
-                    return namespaces;
-                }();
-                constexpr static auto Imports = [] {
-                    if constexpr (requires { T::Imports; }) {
-                        return T::Imports;
-                    }
-                    else {
-                        return SymbolImportList<>{};
-                    }
-                }();
-                constexpr static auto Exports = [] {
-                    if constexpr (requires { T::Exports; }) {
-                        return T::Exports;
-                    }
-                    else {
-                        return SymbolExportList<>{};
-                    }
-                }();
-                using State = decltype([] {
-                    if constexpr (requires { typename T::State; }) {
-                        return std::type_identity<typename T::State>{};
-                    }
-                    else {
-                        return std::type_identity<T>{};
-                    }
-                }())::type;
-
-                struct GlobalData {
-                    bool is_init;
-                    Instance instance;
-                    State *state;
-                    alignas(State) unsigned char storage[sizeof(State)];
-
-                    static GlobalData &get() noexcept {
-                        constinit static GlobalData data = {};
-                        return data;
-                    }
-                };
-                constexpr static auto OnEvent = [](FSTD_ModuleExport const *module_export,
-                                                   FSTD_ModuleExportEventTag *tag) {
-                    switch (*tag) {
-                        case FSTD_ModuleExportEventTag_BindCtx:
-                            if constexpr (requires { T::onBind; }) {
-                                auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventBindCtx::tag>{});
-                                event->bind = [](FSTD_Ctx *cctx) noexcept {
-                                    ctx::Handle ctx = cctx;
-                                    std::invoke_r<void>(T::onBind, ctx);
-                                };
-                                return;
-                            };
-                            break;
-                        case FSTD_ModuleExportEventTag_UnbindCtx:
-                            if constexpr (requires { T::onUnbind; }) {
-                                auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventUnbindCtx::tag>{});
-                                event->unbind = []() noexcept { std::invoke_r<void>(T::onUnbind); };
-                                return;
-                            };
-                            break;
-                        case FSTD_ModuleExportEventTag_Init: {
-                            auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventInit::tag>{});
-                            if constexpr (requires { T::onInit; }) {
-                                event->poll = [](FSTD_ModuleInstance *cinstance, FSTD_ModuleLoader *cloader,
-                                                 FSTD_TaskWaker cwaker,
-                                                 FSTD_ModuleExportEventInitResult *cresult) noexcept {
-                                    auto &global = GlobalData::get();
-                                    fstd_assert(!global.is_init);
-                                    global.instance = cinstance;
-                                    Loader loader = cloader;
-                                    tasks::Waker waker = cwaker;
-                                    State *ptr = reinterpret_cast<State *>(global.storage);
-                                    auto result =
-                                            std::invoke_r<tasks::PollResult<Result>>(T::onInit, ptr, loader, waker);
-                                    if (std::holds_alternative<tasks::PollPendingType>(result)) {
-                                        return false;
-                                    }
-                                    global.is_init = true;
-                                    global.state = std::launder(ptr);
-                                    cresult->value = global.state;
-                                    cresult->result = std::get<Result>(result);
-                                    return true;
-                                };
-                            }
-                            else {
-                                event->poll = [](FSTD_ModuleInstance *instance, FSTD_ModuleLoader *, FSTD_TaskWaker,
-                                                 FSTD_ModuleExportEventInitResult *result) noexcept {
-                                    auto &global = GlobalData::get();
-                                    fstd_assert(!global.is_init);
-                                    global.is_init = true;
-                                    global.instance = instance;
-                                    global.state = std::construct_at(reinterpret_cast<State *>(global.storage));
-                                    result->value = global.state;
-                                    result->result = ResultOk;
-                                    return true;
-                                };
-                            };
-                            return;
-                        }
-                        case FSTD_ModuleExportEventTag_Deinit: {
-                            auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventDeinit::tag>{});
-                            if constexpr (requires { T::onDeinit; }) {
-                                event->poll = [](FSTD_ModuleInstance *, FSTD_TaskWaker cwaker, void *) noexcept {
-                                    auto &global = GlobalData::get();
-                                    fstd_assert(global.is_init);
-                                    tasks::Waker waker = cwaker;
-                                    auto result =
-                                            std::invoke_r<tasks::PollResult<void>>(T::onDeinit, *global.state, waker);
-                                    if (std::holds_alternative<tasks::PollPendingType>(result)) {
-                                        return false;
-                                    }
-                                    global.is_init = false;
-                                    global.state = nullptr;
-                                    return true;
-                                };
-                            }
-                            else {
-                                event->poll = [](FSTD_ModuleInstance *, FSTD_TaskWaker, void *) noexcept {
-                                    auto &global = GlobalData::get();
-                                    fstd_assert(global.is_init);
-                                    global.is_init = false;
-                                    global.instance = {};
-                                    std::destroy_at(global.state);
-                                    global.state = nullptr;
-                                    return true;
-                                };
-                            };
-                            return;
-                        }
-                        case FSTD_ModuleExportEventTag_Start: {
-                            auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventStart::tag>{});
-                            if constexpr (requires { T::onStart; }) {
-                                event->poll = [](FSTD_ModuleInstance *, FSTD_TaskWaker cwaker,
-                                                 FSTD_Result *cresult) noexcept {
-                                    auto &global = GlobalData::get();
-                                    fstd_assert(global.is_init);
-                                    tasks::Waker waker = cwaker;
-                                    auto result = std::invoke_r<tasks::PollResult<Result>>(T::onStart, waker);
-                                    if (std::holds_alternative<tasks::PollPendingType>(result)) {
-                                        return false;
-                                    }
-                                    *cresult = std::get<Result>(result);
-                                    return true;
-                                };
-                            }
-                        } break;
-                        case FSTD_ModuleExportEventTag_Stop: {
-                            auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventStop::tag>{});
-                            if constexpr (requires { T::onStop; }) {
-                                event->poll = [](FSTD_ModuleInstance *, FSTD_TaskWaker cwaker,
-                                                 FSTD_Result *cresult) noexcept {
-                                    auto &global = GlobalData::get();
-                                    fstd_assert(global.is_init);
-                                    tasks::Waker waker = cwaker;
-                                    auto result = std::invoke_r<tasks::PollResult<Result>>(T::onStop, waker);
-                                    if (std::holds_alternative<tasks::PollPendingType>(result)) {
-                                        return false;
-                                    }
-                                    *cresult = std::get<Result>(result);
-                                    return true;
-                                };
-                            }
-                        } break;
-                        default:
-                            break;
-                    }
-                    fstd_module_export_default_on_event(module_export, tag);
-                };
-                constexpr static Export ModuleExport = {
-                        Name, Description, Author, License, Resources, Namespaces, Imports, Exports, OnEvent,
-                };
-
-                constexpr static auto loadSymbolImpl = []<typename U>(SymbolId<U> symbol) static noexcept {
-                    auto &global = GlobalData::get();
-                    fstd_dbg_assert(global.is_init);
-                    return global.instance.template loadSymbol<U>(symbol);
-                };
-                constexpr static auto readParameterImpl = []<typename U>(StrConst module,
-                                                                         StrConst parameter) static noexcept {
-                    auto &global = GlobalData::get();
-                    fstd_dbg_assert(global.is_init);
-                    return global.instance.template readParameter<U>(module, parameter);
-                };
-                constexpr static auto writeParameterImpl = []<typename U>(StrConst module, StrConst parameter,
-                                                                          const U &value) static noexcept {
-                    auto &global = GlobalData::get();
-                    fstd_dbg_assert(global.is_init);
-                    return global.instance.template writeParameter<U>(module, parameter, value);
-                };
-                struct Module {
-                    static constexpr const Export &moduleExport() noexcept { return ModuleExport; }
-                    static bool isInit() noexcept { return GlobalData::get().is_init; }
-                    static Instance instance() noexcept {
-                        fstd_dbg_assert(isInit());
-                        return GlobalData::get().instance;
-                    }
-                    static Handle moduleHandle() noexcept { return instance().moduleHandle(); }
-                    static ctx::Handle ctxHandle() noexcept { return instance().ctxHandle(); }
-                    static State &state() noexcept {
-                        fstd_dbg_assert(isInit());
-                        return *GlobalData::get().state;
-                    }
-                    static void ref() noexcept { return instance().ref(); }
-                    static void unref() noexcept { return instance().unref(); }
-                    static Dependency queryNs(StrConst ns) noexcept { return instance().queryNs(ns); }
-                    static Status addNs(StrConst ns) noexcept { return instance().addNs(ns); }
-                    static Status removeNs(StrConst ns) noexcept { return instance().removeNs(ns); }
-                    static Dependency queryDep(Handle handle) noexcept { return instance().queryDep(handle); }
-                    static Status addDep(Handle handle) noexcept { return instance().addDep(handle); }
-                    static Status removeDep(Handle handle) noexcept { return instance().removeDep(handle); }
-                    decltype(loadSymbolImpl) loadSymbol = loadSymbolImpl;
-                    decltype(readParameterImpl) readParameter = readParameterImpl;
-                    decltype(writeParameterImpl) writeParameter = writeParameterImpl;
-                };
-                return Module{};
-            }
         };
+
+        template<typename T>
+        static consteval auto makeModule() {
+            constexpr static StrConst Name = T::Name;
+            constexpr static StrConst Description = []() -> StrConst {
+                if constexpr (requires { T::Description; }) {
+                    return T::Description;
+                }
+                else {
+                    return "";
+                }
+            }();
+            constexpr static StrConst Author = []() -> StrConst {
+                if constexpr (requires { T::Author; }) {
+                    return T::Author;
+                }
+                else {
+                    return "";
+                }
+            }();
+            constexpr static StrConst License = []() -> StrConst {
+                if constexpr (requires { T::License; }) {
+                    return T::License;
+                }
+                else {
+                    return "";
+                }
+            }();
+            constexpr static auto Resources = [] {
+                if constexpr (requires { T::Resources; }) {
+                    return T::Resources;
+                }
+                else {
+                    return std::array<Path, 0>{};
+                }
+            }();
+            constexpr static auto NumNamespaces = [] -> usize {
+                usize count = 0;
+                if constexpr (requires { T::Imports; }) {
+                    for (usize i = 0; i < T::Imports.NumImports; i++) {
+                        StrConst ns = T::Imports.arr[i].id.ns;
+                        if (ns.empty())
+                            continue;
+                        bool found = false;
+                        for (usize j = 0; j < i; j++) {
+                            StrConst other = T::Imports.arr[j].id.ns;
+                            if (ns == other) {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found)
+                            count++;
+                    }
+                }
+                return count;
+            }();
+            constexpr static auto Namespaces = [] {
+                usize next = 0;
+                std::array<StrConst, NumNamespaces> namespaces{};
+                if constexpr (requires { T::Imports; }) {
+                    for (usize i = 0; i < T::Imports.NumImports; i++) {
+                        StrConst ns = T::Imports.arr[i].id.ns;
+                        if (ns.empty())
+                            continue;
+                        bool found = false;
+                        for (usize j = 0; j < i; j++) {
+                            StrConst other = T::Imports.arr[j].id.ns;
+                            if (ns == other) {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found) {
+                            namespaces[next] = ns;
+                            next++;
+                        }
+                    }
+                }
+                return namespaces;
+            }();
+            constexpr static auto Imports = [] {
+                if constexpr (requires { T::Imports; }) {
+                    return T::Imports;
+                }
+                else {
+                    return SymbolImportList<>{};
+                }
+            }();
+            constexpr static auto Exports = [] {
+                if constexpr (requires { T::Exports; }) {
+                    return T::Exports;
+                }
+                else {
+                    return SymbolExportList<>{};
+                }
+            }();
+            using State = decltype([] {
+                if constexpr (requires { typename T::State; }) {
+                    return std::type_identity<typename T::State>{};
+                }
+                else {
+                    return std::type_identity<T>{};
+                }
+            }())::type;
+
+            struct GlobalData {
+                bool is_init;
+                Instance instance;
+                State *state;
+                alignas(State) unsigned char storage[sizeof(State)];
+
+                static GlobalData &get() noexcept {
+                    constinit static GlobalData data = {};
+                    return data;
+                }
+            };
+            constexpr static auto OnEvent = [](FSTD_ModuleExport const *module_export, FSTD_ModuleExportEventTag *tag) {
+                switch (*tag) {
+                    case FSTD_ModuleExportEventTag_BindCtx:
+                        if constexpr (requires { T::onBind; }) {
+                            auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventBindCtx::tag>{});
+                            event->bind = [](FSTD_Ctx *cctx) noexcept {
+                                ctx::Handle ctx = cctx;
+                                std::invoke_r<void>(T::onBind, ctx);
+                            };
+                            return;
+                        };
+                        break;
+                    case FSTD_ModuleExportEventTag_UnbindCtx:
+                        if constexpr (requires { T::onUnbind; }) {
+                            auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventUnbindCtx::tag>{});
+                            event->unbind = []() noexcept { std::invoke_r<void>(T::onUnbind); };
+                            return;
+                        };
+                        break;
+                    case FSTD_ModuleExportEventTag_Init: {
+                        auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventInit::tag>{});
+                        if constexpr (requires { T::onInit; }) {
+                            event->poll = [](FSTD_ModuleInstance *cinstance, FSTD_ModuleLoader *cloader,
+                                             FSTD_TaskWaker cwaker,
+                                             FSTD_ModuleExportEventInitResult *cresult) noexcept {
+                                auto &global = GlobalData::get();
+                                fstd_assert(!global.is_init);
+                                global.instance = cinstance;
+                                Loader loader = cloader;
+                                tasks::Waker waker = cwaker;
+                                State *ptr = reinterpret_cast<State *>(global.storage);
+                                auto result = std::invoke_r<tasks::PollResult<Result>>(T::onInit, ptr, loader, waker);
+                                if (std::holds_alternative<tasks::PollPendingType>(result)) {
+                                    return false;
+                                }
+                                global.is_init = true;
+                                global.state = std::launder(ptr);
+                                cresult->value = global.state;
+                                cresult->result = std::get<Result>(result);
+                                return true;
+                            };
+                        }
+                        else {
+                            event->poll = [](FSTD_ModuleInstance *instance, FSTD_ModuleLoader *, FSTD_TaskWaker,
+                                             FSTD_ModuleExportEventInitResult *result) noexcept {
+                                auto &global = GlobalData::get();
+                                fstd_assert(!global.is_init);
+                                global.is_init = true;
+                                global.instance = instance;
+                                global.state = std::construct_at(reinterpret_cast<State *>(global.storage));
+                                result->value = global.state;
+                                result->result = Result{};
+                                return true;
+                            };
+                        };
+                        return;
+                    }
+                    case FSTD_ModuleExportEventTag_Deinit: {
+                        auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventDeinit::tag>{});
+                        if constexpr (requires { T::onDeinit; }) {
+                            event->poll = [](FSTD_ModuleInstance *, FSTD_TaskWaker cwaker, void *) noexcept {
+                                auto &global = GlobalData::get();
+                                fstd_assert(global.is_init);
+                                tasks::Waker waker = cwaker;
+                                auto result = std::invoke_r<tasks::PollResult<void>>(T::onDeinit, *global.state, waker);
+                                if (std::holds_alternative<tasks::PollPendingType>(result)) {
+                                    return false;
+                                }
+                                global.is_init = false;
+                                global.state = nullptr;
+                                return true;
+                            };
+                        }
+                        else {
+                            event->poll = [](FSTD_ModuleInstance *, FSTD_TaskWaker, void *) noexcept {
+                                auto &global = GlobalData::get();
+                                fstd_assert(global.is_init);
+                                global.is_init = false;
+                                global.instance = {};
+                                std::destroy_at(global.state);
+                                global.state = nullptr;
+                                return true;
+                            };
+                        };
+                        return;
+                    }
+                    case FSTD_ModuleExportEventTag_Start: {
+                        auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventStart::tag>{});
+                        if constexpr (requires { T::onStart; }) {
+                            event->poll = [](FSTD_ModuleInstance *, FSTD_TaskWaker cwaker,
+                                             FSTD_Result *cresult) noexcept {
+                                auto &global = GlobalData::get();
+                                fstd_assert(global.is_init);
+                                tasks::Waker waker = cwaker;
+                                auto result = std::invoke_r<tasks::PollResult<Result>>(T::onStart, waker);
+                                if (std::holds_alternative<tasks::PollPendingType>(result)) {
+                                    return false;
+                                }
+                                *cresult = std::get<Result>(result);
+                                return true;
+                            };
+                        }
+                    } break;
+                    case FSTD_ModuleExportEventTag_Stop: {
+                        auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventStop::tag>{});
+                        if constexpr (requires { T::onStop; }) {
+                            event->poll = [](FSTD_ModuleInstance *, FSTD_TaskWaker cwaker,
+                                             FSTD_Result *cresult) noexcept {
+                                auto &global = GlobalData::get();
+                                fstd_assert(global.is_init);
+                                tasks::Waker waker = cwaker;
+                                auto result = std::invoke_r<tasks::PollResult<Result>>(T::onStop, waker);
+                                if (std::holds_alternative<tasks::PollPendingType>(result)) {
+                                    return false;
+                                }
+                                *cresult = std::get<Result>(result);
+                                return true;
+                            };
+                        }
+                    } break;
+                    default:
+                        break;
+                }
+                fstd_module_export_default_on_event(module_export, tag);
+            };
+            constexpr static Export ModuleExport = {
+                    Name, Description, Author, License, Resources, Namespaces, Imports, Exports, OnEvent,
+            };
+
+            constexpr static auto loadSymbolImpl = []<typename U>(SymbolId<U> symbol) static noexcept {
+                auto &global = GlobalData::get();
+                fstd_dbg_assert(global.is_init);
+                return global.instance.template loadSymbol<U>(symbol);
+            };
+            constexpr static auto readParameterImpl = []<typename U>(StrConst module,
+                                                                     StrConst parameter) static noexcept {
+                auto &global = GlobalData::get();
+                fstd_dbg_assert(global.is_init);
+                return global.instance.template readParameter<U>(module, parameter);
+            };
+            constexpr static auto writeParameterImpl = []<typename U>(StrConst module, StrConst parameter,
+                                                                      const U &value) static noexcept {
+                auto &global = GlobalData::get();
+                fstd_dbg_assert(global.is_init);
+                return global.instance.template writeParameter<U>(module, parameter, value);
+            };
+            struct Module {
+                static constexpr const Export &moduleExport() noexcept { return ModuleExport; }
+                static bool isInit() noexcept { return GlobalData::get().is_init; }
+                static Instance instance() noexcept {
+                    fstd_dbg_assert(isInit());
+                    return GlobalData::get().instance;
+                }
+                static Handle moduleHandle() noexcept { return instance().moduleHandle(); }
+                static ctx::Handle ctxHandle() noexcept { return instance().ctxHandle(); }
+                static State &state() noexcept {
+                    fstd_dbg_assert(isInit());
+                    return *GlobalData::get().state;
+                }
+                static void ref() noexcept { return instance().ref(); }
+                static void unref() noexcept { return instance().unref(); }
+                static Dependency queryNs(StrConst ns) noexcept { return instance().queryNs(ns); }
+                static Status addNs(StrConst ns) noexcept { return instance().addNs(ns); }
+                static Status removeNs(StrConst ns) noexcept { return instance().removeNs(ns); }
+                static Dependency queryDep(Handle handle) noexcept { return instance().queryDep(handle); }
+                static Status addDep(Handle handle) noexcept { return instance().addDep(handle); }
+                static Status removeDep(Handle handle) noexcept { return instance().removeDep(handle); }
+                decltype(loadSymbolImpl) loadSymbol = loadSymbolImpl;
+                decltype(readParameterImpl) readParameter = readParameterImpl;
+                decltype(writeParameterImpl) writeParameter = writeParameterImpl;
+            };
+            return Module{};
+        }
 
         tasks::PollResult<std::expected<Loader::ResolvedModule, Result>>
         Loader::pollModule(tasks::Waker waker, StrConst module) const noexcept {
