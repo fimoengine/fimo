@@ -3998,10 +3998,10 @@ namespace fstd {
 
     using Uuid = FSTD_Uuid;
 
-    namespace detail {
-        template<auto Value>
-        struct StaticValue {};
+    template<auto Value>
+    struct ConstexprValue {};
 
+    namespace detail {
         template<auto>
         struct MemberPointerInfo;
         template<typename T, typename U, T U::*Member>
@@ -4049,8 +4049,8 @@ namespace fstd {
         }
 
         template<typename F, typename Ret, typename... Args>
-        concept InvocableWithReturn = std::invocable<F, Args...> && requires(F &&f) {
-            { f() } -> std::same_as<Ret>;
+        concept InvocableWithReturn = std::invocable<F, Args...> && requires(F &&f, Args &&...args) {
+            { f(std::forward<Args>(args)...) } -> std::same_as<Ret>;
         };
 
         template<InvocableWithReturn<void> F>
@@ -4088,18 +4088,15 @@ namespace fstd {
         };
 
         template<typename... Args>
-        struct FormatString_ {
+        struct FormatString {
             std::format_string<Args...> fmt;
             std::source_location loc = std::source_location::current();
 
             template<class T>
                 requires std::constructible_from<std::format_string<Args...>, T const &>
-            consteval FormatString_(T const &fmt, std::source_location loc = std::source_location::current()) :
+            consteval FormatString(T const &fmt, std::source_location loc = std::source_location::current()) :
                 fmt(fmt), loc(loc){};
         };
-
-        template<typename... Args>
-        using FormatString = detail::FormatString_<std::type_identity_t<Args>...>;
 
         static constexpr int maximum(int a, int b) {
             if (a > b)
@@ -4169,6 +4166,25 @@ namespace fstd {
     inline static detail::ScopeGuard<Callback> makeScopeGuard(Callback &&callback) noexcept(
             std::is_nothrow_constructible_v<detail::ScopeGuard<Callback>, Callback &&>) {
         return detail::ScopeGuard{std::forward<Callback>(callback)};
+    }
+
+    template<typename... Args>
+    using FormatString = detail::FormatString<std::type_identity_t<Args>...>;
+
+    template<typename T, typename U, T U::*Member>
+    inline U *parentOf(T *value, ConstexprValue<Member>) noexcept {
+        constexpr static auto offset = detail::offsetOf<Member>();
+        char *value_ptr = reinterpret_cast<char *>(value);
+        value_ptr -= offset;
+        return reinterpret_cast<U *>(value_ptr);
+    }
+
+    template<typename T, typename U, T U::*Member>
+    inline U const *parentOf(T const *value, ConstexprValue<Member>) noexcept {
+        constexpr static auto offset = detail::offsetOf<Member>();
+        char const *value_ptr = reinterpret_cast<char *>(value);
+        value_ptr -= offset;
+        return reinterpret_cast<U const *>(value_ptr);
     }
 
     // -----------------------------------------
@@ -4796,53 +4812,56 @@ namespace fstd {
     // context api -----------------------------
     // -----------------------------------------
 
-    constexpr Version CtxVersion = {FSTD_CTX_VERSION};
+    namespace ctx {
+        constexpr static Version CurrentVersion = {FSTD_CTX_VERSION};
 
-    // NOLINTNEXTLINE(performance-enum-size)
-    enum class CfgId : FSTD_CfgId {
-        Core = FSTD_CfgId_Core,
-        Tracing = FSTD_CfgId_Tracing,
-        Modules = FSTD_CfgId_Modules,
-    };
+        // NOLINTNEXTLINE(performance-enum-size)
+        enum class CfgId : FSTD_CfgId {
+            Core = FSTD_CfgId_Core,
+            Tracing = FSTD_CfgId_Tracing,
+            Modules = FSTD_CfgId_Modules,
+        };
 
-    using Cfg = FSTD_Cfg;
+        using Cfg = FSTD_Cfg;
 
-    struct Ctx {
-        using Type = Ctx;
-        using FStd = FSTD_Ctx *;
-        constexpr Ctx() noexcept = default;
-        constexpr Ctx(const FStd &other) noexcept : handle(other) {};
-        constexpr Ctx(const Ctx &other) noexcept = default;
-        constexpr Ctx(Ctx &&other) noexcept = default;
-        constexpr Ctx &operator=(const Ctx &other) noexcept = default;
-        constexpr Ctx &operator=(Ctx &&other) noexcept = default;
-        constexpr operator FSTD_Ctx *() const noexcept { return this->handle; };
+        struct Handle {
+            using Type = Handle;
+            using FStd = FSTD_Ctx *;
+            constexpr Handle() noexcept = default;
+            constexpr Handle(const FStd &other) noexcept : handle(other) {};
+            constexpr Handle(const Handle &other) noexcept = default;
+            constexpr Handle(Handle &&other) noexcept = default;
+            constexpr Handle &operator=(const Handle &other) noexcept = default;
+            constexpr Handle &operator=(Handle &&other) noexcept = default;
+            constexpr operator FSTD_Ctx *() const noexcept { return this->handle; };
 
-        FSTD_Ctx *handle;
+            FSTD_Ctx *handle;
 
-        static Ctx get() noexcept { return fstd_ctx_get(); }
-        static void bind(Ctx ctx) noexcept { return fstd_ctx_register(ctx); }
-        static void unbind() noexcept { return fstd_ctx_unregister(); }
+            static Handle get() noexcept { return fstd_ctx_get(); }
+            static void bind(Handle ctx) noexcept { return fstd_ctx_register(ctx); }
+            static void unbind() noexcept { return fstd_ctx_unregister(); }
 
-        static std::expected<Ctx, Result> init(Slice<const Cfg *> cfgs) noexcept {
-            Ctx ctx{};
-            Result status = fstd_ctx_init(&ctx.handle, cfgs);
-            if (status.isErr())
-                return std::unexpected(status);
-            return ctx;
-        }
-        static void deinit() noexcept { return fstd_ctx_deinit(); }
-        static Version getVersion() noexcept { return fstd_ctx_get_version(); }
-        static Arena &getGlobalArena() noexcept { return *static_cast<Arena *>(fstd_ctx_get_global_arena()); }
-        static Arena &getScratchArena(Arena *conflict) noexcept {
+            static std::expected<Handle, Result> init(Slice<const Cfg *> cfgs) noexcept {
+                Handle ctx{};
+                Result status = fstd_ctx_init(&ctx.handle, cfgs);
+                if (status.isErr())
+                    return std::unexpected(status);
+                return ctx;
+            }
+            static void deinit() noexcept { return fstd_ctx_deinit(); }
+        };
+
+        inline static Version getVersion() noexcept { return fstd_ctx_get_version(); }
+        inline static Arena &getGlobalArena() noexcept { return *static_cast<Arena *>(fstd_ctx_get_global_arena()); }
+        inline static Arena &getScratchArena(Arena *conflict) noexcept {
             return *static_cast<Arena *>(fstd_ctx_get_scratch_arena(conflict));
         }
-        static bool hasErrorResult() noexcept { return fstd_ctx_has_error_result(); }
-        static Result hasErrorResult(Result new_result) noexcept { return fstd_ctx_replace_result(new_result); }
-        static Result takeResult() noexcept { return fstd_ctx_take_result(); }
-        static void clearResult() noexcept { return fstd_ctx_clear_result(); }
-        static void setResult(Result new_result) noexcept { return fstd_ctx_set_result(new_result); }
-    };
+        inline static bool hasErrorResult() noexcept { return fstd_ctx_has_error_result(); }
+        inline static Result hasErrorResult(Result new_result) noexcept { return fstd_ctx_replace_result(new_result); }
+        inline static Result takeResult() noexcept { return fstd_ctx_take_result(); }
+        inline static void clearResult() noexcept { return fstd_ctx_clear_result(); }
+        inline static void setResult(Result new_result) noexcept { return fstd_ctx_set_result(new_result); }
+    } // namespace ctx
 
     // -----------------------------------------
     // async subsystem -------------------------
@@ -5097,28 +5116,31 @@ namespace fstd {
         struct Scope {
             template<detail::ConstString target = DefaultTarget, Level max_lvl = max_level>
             struct Target {
+                constexpr static auto ScopeName = scope;
+                constexpr static auto TargetName = target;
+
                 template<typename Unique = decltype([] {}), typename... Args>
-                static void logErr(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static void logErr(FormatString<Args...> fmt, Args &&...args) noexcept {
                     logStatic<Unique, Level::Error, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static void logWarn(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static void logWarn(FormatString<Args...> fmt, Args &&...args) noexcept {
                     logStatic<Unique, Level::Warn, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static void logInfo(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static void logInfo(FormatString<Args...> fmt, Args &&...args) noexcept {
                     logStatic<Unique, Level::Info, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static void logDebug(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static void logDebug(FormatString<Args...> fmt, Args &&...args) noexcept {
                     logStatic<Unique, Level::Debug, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static void logTrace(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static void logTrace(FormatString<Args...> fmt, Args &&...args) noexcept {
                     logStatic<Unique, Level::Trace, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static void log(Level lvl, detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static void log(Level lvl, FormatString<Args...> fmt, Args &&...args) noexcept {
                     const auto formatter = [fmt, &args...](Slice<char> buffer) -> usize {
                         std::format_to_n_result result =
                                 std::format_to_n(buffer.ptr, buffer.len, fmt.fmt, std::forward<Args>(args)...);
@@ -5132,7 +5154,7 @@ namespace fstd {
                     logWithFormatter<Unique>(lvl, trampoline, &formatter, fmt.loc);
                 }
                 template<typename Unique = decltype([] {}), Level lvl, typename... Args>
-                static void logStatic(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static void logStatic(FormatString<Args...> fmt, Args &&...args) noexcept {
                     const auto formatter = [fmt, &args...](Slice<char> buffer) -> usize {
                         std::format_to_n_result result =
                                 std::format_to_n(buffer.ptr, buffer.len, fmt.fmt, std::forward<Args>(args)...);
@@ -5167,7 +5189,7 @@ namespace fstd {
                     return spanStatic<Unique, Level::Error>();
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static auto spanErr(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static auto spanErr(FormatString<Args...> fmt, Args &&...args) noexcept {
                     return spanStatic<Unique, Level::Error, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {})>
@@ -5175,7 +5197,7 @@ namespace fstd {
                     return spanStatic<Unique, Level::Warn>();
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static auto spanWarn(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static auto spanWarn(FormatString<Args...> fmt, Args &&...args) noexcept {
                     return spanStatic<Unique, Level::Warn, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {})>
@@ -5183,7 +5205,7 @@ namespace fstd {
                     return spanStatic<Unique, Level::Info>();
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static auto spanInfo(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static auto spanInfo(FormatString<Args...> fmt, Args &&...args) noexcept {
                     return spanStatic<Unique, Level::Info, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {})>
@@ -5191,7 +5213,7 @@ namespace fstd {
                     return spanStatic<Unique, Level::Debug>();
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static auto spanDebug(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static auto spanDebug(FormatString<Args...> fmt, Args &&...args) noexcept {
                     return spanStatic<Unique, Level::Debug, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {})>
@@ -5199,7 +5221,7 @@ namespace fstd {
                     return spanStatic<Unique, Level::Trace>();
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static auto spanTrace(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static auto spanTrace(FormatString<Args...> fmt, Args &&...args) noexcept {
                     return spanStatic<Unique, Level::Trace, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {})>
@@ -5211,8 +5233,7 @@ namespace fstd {
                     return spanStatic<Unique, lvl>("");
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static std::optional<Span::Auto> span(Level lvl, detail::FormatString<Args...> fmt,
-                                                      Args &&...args) noexcept {
+                static std::optional<Span::Auto> span(Level lvl, FormatString<Args...> fmt, Args &&...args) noexcept {
                     const auto formatter = [fmt, &args...](Slice<char> buffer) -> usize {
                         std::format_to_n_result result =
                                 std::format_to_n(buffer.ptr, buffer.len, fmt.fmt, std::forward<Args>(args)...);
@@ -5226,7 +5247,7 @@ namespace fstd {
                     return spanWithFormatter<Unique>(lvl, trampoline, &formatter, fmt.loc);
                 }
                 template<typename Unique = decltype([] {}), Level lvl, typename... Args>
-                static auto spanStatic(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static auto spanStatic(FormatString<Args...> fmt, Args &&...args) noexcept {
                     const auto formatter = [fmt, &args...](Slice<char> buffer) -> usize {
                         std::format_to_n_result result =
                                 std::format_to_n(buffer.ptr, buffer.len, fmt.fmt, std::forward<Args>(args)...);
@@ -5263,29 +5284,31 @@ namespace fstd {
                 }
             };
             using DefaultCtx = Target<>;
+            constexpr static auto ScopeName = DefaultCtx::ScopeName;
+            constexpr static auto TargetName = DefaultCtx::TargetName;
 
             template<typename Unique = decltype([] {}), typename... Args>
-            static void logErr(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static void logErr(FormatString<Args...> fmt, Args &&...args) noexcept {
                 DefaultCtx::template logErr<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static void logWarn(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static void logWarn(FormatString<Args...> fmt, Args &&...args) noexcept {
                 DefaultCtx::template logWarn<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static void logInfo(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static void logInfo(FormatString<Args...> fmt, Args &&...args) noexcept {
                 DefaultCtx::template logInfo<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static void logDebug(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static void logDebug(FormatString<Args...> fmt, Args &&...args) noexcept {
                 DefaultCtx::template logDebug<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static void logTrace(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static void logTrace(FormatString<Args...> fmt, Args &&...args) noexcept {
                 DefaultCtx::template logTrace<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static void log(Level lvl, detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static void log(Level lvl, FormatString<Args...> fmt, Args &&...args) noexcept {
                 DefaultCtx::template log<Unique, Args...>(lvl, fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {})>
@@ -5298,7 +5321,7 @@ namespace fstd {
                 return DefaultCtx::template spanErr<Unique>();
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static auto spanErr(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static auto spanErr(FormatString<Args...> fmt, Args &&...args) noexcept {
                 return DefaultCtx::template spanErr<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {})>
@@ -5306,7 +5329,7 @@ namespace fstd {
                 return DefaultCtx::template spanWarn<Unique>();
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static auto spanWarn(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static auto spanWarn(FormatString<Args...> fmt, Args &&...args) noexcept {
                 return DefaultCtx::template spanWarn<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {})>
@@ -5314,7 +5337,7 @@ namespace fstd {
                 return DefaultCtx::template spanInfo<Unique>();
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static auto spanInfo(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static auto spanInfo(FormatString<Args...> fmt, Args &&...args) noexcept {
                 return DefaultCtx::template spanInfo<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {})>
@@ -5322,7 +5345,7 @@ namespace fstd {
                 return DefaultCtx::template spanDebug<Unique>();
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static auto spanDebug(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static auto spanDebug(FormatString<Args...> fmt, Args &&...args) noexcept {
                 return DefaultCtx::template spanDebug<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {})>
@@ -5330,7 +5353,7 @@ namespace fstd {
                 return DefaultCtx::template spanTrace<Unique>();
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static auto spanTrace(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static auto spanTrace(FormatString<Args...> fmt, Args &&...args) noexcept {
                 return DefaultCtx::template spanTrace<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {})>
@@ -5338,8 +5361,7 @@ namespace fstd {
                 return DefaultCtx::template span<Unique>(lvl);
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static std::optional<Span::Auto> span(Level lvl, detail::FormatString<Args...> fmt,
-                                                  Args &&...args) noexcept {
+            static std::optional<Span::Auto> span(Level lvl, FormatString<Args...> fmt, Args &&...args) noexcept {
                 return DefaultCtx::template span<Unique, Args...>(lvl, fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {})>
@@ -5353,27 +5375,27 @@ namespace fstd {
         using DefaultCtx = DefaultScopeCtx::DefaultCtx;
 
         template<typename Unique = decltype([] {}), typename... Args>
-        static void logErr(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static void logErr(FormatString<Args...> fmt, Args &&...args) noexcept {
             DefaultScopeCtx::template logErr<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static void logWarn(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static void logWarn(FormatString<Args...> fmt, Args &&...args) noexcept {
             DefaultScopeCtx::template logWarn<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static void logInfo(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static void logInfo(FormatString<Args...> fmt, Args &&...args) noexcept {
             DefaultScopeCtx::template logInfo<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static void logDebug(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static void logDebug(FormatString<Args...> fmt, Args &&...args) noexcept {
             DefaultScopeCtx::template logDebug<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static void logTrace(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static void logTrace(FormatString<Args...> fmt, Args &&...args) noexcept {
             DefaultScopeCtx::template logTrace<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static void log(Level lvl, detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static void log(Level lvl, FormatString<Args...> fmt, Args &&...args) noexcept {
             DefaultScopeCtx::template log<Unique, Args...>(lvl, fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {})>
@@ -5386,7 +5408,7 @@ namespace fstd {
             return DefaultScopeCtx::template spanErr<Unique>();
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static auto spanErr(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static auto spanErr(FormatString<Args...> fmt, Args &&...args) noexcept {
             return DefaultScopeCtx::template spanErr<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {})>
@@ -5394,7 +5416,7 @@ namespace fstd {
             return DefaultScopeCtx::template spanWarn<Unique>();
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static auto spanWarn(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static auto spanWarn(FormatString<Args...> fmt, Args &&...args) noexcept {
             return DefaultScopeCtx::template spanWarn<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {})>
@@ -5402,7 +5424,7 @@ namespace fstd {
             return DefaultScopeCtx::template spanInfo<Unique>();
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static auto spanInfo(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static auto spanInfo(FormatString<Args...> fmt, Args &&...args) noexcept {
             return DefaultScopeCtx::template spanInfo<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {})>
@@ -5410,7 +5432,7 @@ namespace fstd {
             return DefaultScopeCtx::template spanDebug<Unique>();
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static auto spanDebug(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static auto spanDebug(FormatString<Args...> fmt, Args &&...args) noexcept {
             return DefaultScopeCtx::template spanDebug<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {})>
@@ -5418,7 +5440,7 @@ namespace fstd {
             return DefaultScopeCtx::template spanTrace<Unique>();
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static auto spanTrace(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static auto spanTrace(FormatString<Args...> fmt, Args &&...args) noexcept {
             return DefaultScopeCtx::template spanTrace<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {})>
@@ -5426,7 +5448,7 @@ namespace fstd {
             return DefaultScopeCtx::template span<Unique>(lvl);
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static std::optional<Span::Auto> span(Level lvl, detail::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static std::optional<Span::Auto> span(Level lvl, FormatString<Args...> fmt, Args &&...args) noexcept {
             return DefaultScopeCtx::template span<Unique, Args...>(lvl, fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {})>
@@ -5475,121 +5497,121 @@ namespace fstd {
                     switch (*tag) {
                         case FSTD_TracingEventTag_Start: {
                             if constexpr (requires { sub.onEvent(std::declval<Start>()); }) {
-                                const auto *event = fstd_parent_of_const(Start, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&Start::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_Finish: {
                             if constexpr (requires { sub.onEvent(std::declval<Finish>()); }) {
-                                const auto *event = fstd_parent_of_const(Finish, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&Finish::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_RegisterThread: {
                             if constexpr (requires { sub.onEvent(std::declval<RegisterThread>()); }) {
-                                const auto *event = fstd_parent_of_const(RegisterThread, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&RegisterThread::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_UnregisterThread: {
                             if constexpr (requires { sub.onEvent(std::declval<UnregisterThread>()); }) {
-                                const auto *event = fstd_parent_of_const(UnregisterThread, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&UnregisterThread::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_CreateCallStack: {
                             if constexpr (requires { sub.onEvent(std::declval<CreateCallStack>()); }) {
-                                const auto *event = fstd_parent_of_const(CreateCallStack, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&CreateCallStack::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_DestroyCallStack: {
                             if constexpr (requires { sub.onEvent(std::declval<DestroyCallStack>()); }) {
-                                const auto *event = fstd_parent_of_const(DestroyCallStack, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&DestroyCallStack::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_UnblockCallStack: {
                             if constexpr (requires { sub.onEvent(std::declval<UnblockCallStack>()); }) {
-                                const auto *event = fstd_parent_of_const(UnblockCallStack, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&UnblockCallStack::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_SuspendCallStack: {
                             if constexpr (requires { sub.onEvent(std::declval<SuspendCallStack>()); }) {
-                                const auto *event = fstd_parent_of_const(SuspendCallStack, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&SuspendCallStack::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_ResumeCallStack: {
                             if constexpr (requires { sub.onEvent(std::declval<ResumeCallStack>()); }) {
-                                const auto *event = fstd_parent_of_const(ResumeCallStack, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&ResumeCallStack::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_EnterSpan: {
                             if constexpr (requires { sub.onEvent(std::declval<EnterSpan>()); }) {
-                                const auto *event = fstd_parent_of_const(EnterSpan, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&EnterSpan::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_ExitSpan: {
                             if constexpr (requires { sub.onEvent(std::declval<ExitSpan>()); }) {
-                                const auto *event = fstd_parent_of_const(ExitSpan, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&ExitSpan::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_LogMessage: {
                             if constexpr (requires { sub.onEvent(std::declval<LogMessage>()); }) {
-                                const auto *event = fstd_parent_of_const(LogMessage, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&LogMessage::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_DeclareEventInfo: {
                             if constexpr (requires { sub.onEvent(std::declval<DeclareEventInfo>()); }) {
-                                const auto *event = fstd_parent_of_const(DeclareEventInfo, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&DeclareEventInfo::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_StartThread: {
                             if constexpr (requires { sub.onEvent(std::declval<StartThread>()); }) {
-                                const auto *event = fstd_parent_of_const(StartThread, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&StartThread::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_StopThread: {
                             if constexpr (requires { sub.onEvent(std::declval<StopThread>()); }) {
-                                const auto *event = fstd_parent_of_const(StopThread, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&StopThread::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_LoadImage: {
                             if constexpr (requires { sub.onEvent(std::declval<LoadImage>()); }) {
-                                const auto *event = fstd_parent_of_const(LoadImage, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&LoadImage::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_UnloadImage: {
                             if constexpr (requires { sub.onEvent(std::declval<UnloadImage>()); }) {
-                                const auto *event = fstd_parent_of_const(UnloadImage, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&UnloadImage::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_ContextSwitch: {
                             if constexpr (requires { sub.onEvent(std::declval<ContextSwitch>()); }) {
-                                const auto *event = fstd_parent_of_const(ContextSwitch, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&ContextSwitch::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_ThreadWakeup: {
                             if constexpr (requires { sub.onEvent(std::declval<ThreadWakeup>()); }) {
-                                const auto *event = fstd_parent_of_const(ThreadWakeup, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&ThreadWakeup::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_CallStackSample: {
                             if constexpr (requires { sub.onEvent(std::declval<CallStackSample>()); }) {
-                                const auto *event = fstd_parent_of_const(CallStackSample, tag, &sub);
+                                auto *event = parentOf(tag, ConstexprValue<&CallStackSample::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
@@ -5660,7 +5682,7 @@ namespace fstd {
             constexpr Cfg(usize format_buffer_len, Level max_level, Slice<const Subscriber> subscribers,
                           bool register_thread, StrConst app_name) noexcept :
                 FStd{
-                        .id = {.id = static_cast<FSTD_CfgId>(CfgId::Tracing)},
+                        .id = {.id = static_cast<FSTD_CfgId>(ctx::CfgId::Tracing)},
                         .format_buffer_len = format_buffer_len,
                         .max_level = static_cast<FSTD_TracingLevel>(max_level),
                         .subscribers = subscribers,
@@ -6055,7 +6077,7 @@ namespace fstd {
                 return fstd_module_instance_exports(this->handle);
             }
             Handle moduleHandle() const noexcept { return fstd_module_instance_handle(this->handle); }
-            Ctx ctxHandle() const noexcept { return fstd_module_instance_ctx_handle(this->handle); }
+            ctx::Handle ctxHandle() const noexcept { return fstd_module_instance_ctx_handle(this->handle); }
             void const *FSTD_MAYBE_NULL state() const noexcept { return fstd_module_instance_state(this->handle); }
 
             void ref() const noexcept { return fstd_module_instance_ref(this->handle); }
@@ -6291,18 +6313,17 @@ namespace fstd {
                 symbol(sym), type(SymbolType::Static), linkage(linkage), static_value(&value) {};
 
             template<auto Member, typename Unique>
-            constexpr SymbolExport(const Symbol<T, Unique> &sym, detail::StaticValue<Member> value) noexcept :
+            constexpr SymbolExport(const Symbol<T, Unique> &sym, ConstexprValue<Member> value) noexcept :
                 SymbolExport(static_cast<SymbolIdExt<T>>(sym), SymbolLinkage::Global, value) {}
             template<auto Member>
-            constexpr SymbolExport(const SymbolIdExt<T> &sym, detail::StaticValue<Member> value) noexcept :
+            constexpr SymbolExport(const SymbolIdExt<T> &sym, ConstexprValue<Member> value) noexcept :
                 SymbolExport(sym, SymbolLinkage::Global, value) {}
             template<auto Member, typename Unique>
             constexpr SymbolExport(const Symbol<T, Unique> &sym, SymbolLinkage linkage,
-                                   detail::StaticValue<Member> value) noexcept :
+                                   ConstexprValue<Member> value) noexcept :
                 SymbolExport(static_cast<SymbolIdExt<T>>(sym), linkage, value){};
             template<auto Member>
-            constexpr SymbolExport(const SymbolIdExt<T> &sym, SymbolLinkage linkage,
-                                   detail::StaticValue<Member>) noexcept :
+            constexpr SymbolExport(const SymbolIdExt<T> &sym, SymbolLinkage linkage, ConstexprValue<Member>) noexcept :
                 symbol(sym), type(SymbolType::StateOffset), linkage(linkage),
                 state_offset(detail::offsetOf<Member>()){};
 
@@ -6329,10 +6350,15 @@ namespace fstd {
             };
         };
 
+        template<typename... Args>
+        static consteval auto makeExport(Args &&...args) {
+            return SymbolExport{std::forward<Args>(args)...};
+        }
+
         template<auto Member, typename... Args>
         static consteval SymbolExport<typename detail::MemberPointerInfo<Member>::Type>
         makeMemberExport(Args &&...args) {
-            return SymbolExport{std::forward<Args>(args)..., detail::StaticValue<Member>{}};
+            return SymbolExport{std::forward<Args>(args)..., ConstexprValue<Member>{}};
         }
 
 
@@ -6386,9 +6412,18 @@ namespace fstd {
             std::array<FSTD_ModuleSymbolExt, NumImports> arr;
 
             template<usize Index>
-            constexpr std::tuple_element_t<Index, std::tuple<SymbolIdExt<Ts>...>> get() noexcept {
+            constexpr std::tuple_element_t<Index, std::tuple<SymbolIdExt<Ts>...>> get() const noexcept {
                 return this->arr[Index];
             }
+            template<typename F, usize... I>
+            constexpr void forEachImpl(F &&f, std::index_sequence<I...>) const {
+                ((std::invoke(f, this->template get<I>())), ...);
+            }
+            template<typename F>
+            constexpr void forEach(F &&f) const {
+                return this->forEachImpl(std::forward<F>(f), std::index_sequence_for<Ts...>{});
+            }
+
             template<typename... Us>
             constexpr SymbolImportList<Ts..., Us...> with(const SymbolImportList<Us...> &other) noexcept {
                 std::array<FSTD_ModuleSymbolExt, sizeof...(Ts) + sizeof...(Us)> arr{};
@@ -6524,7 +6559,7 @@ namespace fstd {
                              const StrConst &license, const Slice<const Path> &resources,
                              const Slice<const StrConst> &namespaces, const SymbolImportList<Imports...> &imports,
                              const SymbolExportList<Exports...> &exports, OnEvent &&on_event) noexcept {
-                this->version = CtxVersion;
+                this->version = ctx::CurrentVersion;
                 this->name = name;
                 this->description = description;
                 this->author = author;
@@ -6674,10 +6709,9 @@ namespace fstd {
                     switch (*tag) {
                         case FSTD_ModuleExportEventTag_BindCtx:
                             if constexpr (requires { T::onBind; }) {
-                                FSTD_ModuleExportEventBindCtx *event =
-                                        fstd_parent_of(FSTD_ModuleExportEventBindCtx, tag, tag);
+                                auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventBindCtx::tag>{});
                                 event->bind = [](FSTD_Ctx *cctx) noexcept {
-                                    Ctx ctx = cctx;
+                                    ctx::Handle ctx = cctx;
                                     std::invoke_r<void>(T::onBind, ctx);
                                 };
                                 return;
@@ -6685,14 +6719,13 @@ namespace fstd {
                             break;
                         case FSTD_ModuleExportEventTag_UnbindCtx:
                             if constexpr (requires { T::onUnbind; }) {
-                                FSTD_ModuleExportEventUnbindCtx *event =
-                                        fstd_parent_of(FSTD_ModuleExportEventUnbindCtx, tag, tag);
+                                auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventUnbindCtx::tag>{});
                                 event->unbind = []() noexcept { std::invoke_r<void>(T::onUnbind); };
                                 return;
                             };
                             break;
                         case FSTD_ModuleExportEventTag_Init: {
-                            FSTD_ModuleExportEventInit *event = fstd_parent_of(FSTD_ModuleExportEventInit, tag, tag);
+                            auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventInit::tag>{});
                             if constexpr (requires { T::onInit; }) {
                                 event->poll = [](FSTD_ModuleInstance *cinstance, FSTD_ModuleLoader *cloader,
                                                  FSTD_TaskWaker cwaker,
@@ -6731,8 +6764,7 @@ namespace fstd {
                             return;
                         }
                         case FSTD_ModuleExportEventTag_Deinit: {
-                            FSTD_ModuleExportEventDeinit *event =
-                                    fstd_parent_of(FSTD_ModuleExportEventDeinit, tag, tag);
+                            auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventDeinit::tag>{});
                             if constexpr (requires { T::onDeinit; }) {
                                 event->poll = [](FSTD_ModuleInstance *, FSTD_TaskWaker cwaker, void *) noexcept {
                                     auto &global = GlobalData::get();
@@ -6762,7 +6794,7 @@ namespace fstd {
                             return;
                         }
                         case FSTD_ModuleExportEventTag_Start: {
-                            FSTD_ModuleExportEventStart *event = fstd_parent_of(FSTD_ModuleExportEventStart, tag, tag);
+                            auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventStart::tag>{});
                             if constexpr (requires { T::onStart; }) {
                                 event->poll = [](FSTD_ModuleInstance *, FSTD_TaskWaker cwaker,
                                                  FSTD_Result *cresult) noexcept {
@@ -6779,7 +6811,7 @@ namespace fstd {
                             }
                         } break;
                         case FSTD_ModuleExportEventTag_Stop: {
-                            FSTD_ModuleExportEventStop *event = fstd_parent_of(FSTD_ModuleExportEventStop, tag, tag);
+                            auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventStop::tag>{});
                             if constexpr (requires { T::onStop; }) {
                                 event->poll = [](FSTD_ModuleInstance *, FSTD_TaskWaker cwaker,
                                                  FSTD_Result *cresult) noexcept {
@@ -6829,7 +6861,7 @@ namespace fstd {
                         return GlobalData::get().instance;
                     }
                     static Handle moduleHandle() noexcept { return instance().moduleHandle(); }
-                    static Ctx ctxHandle() noexcept { return instance().ctxHandle(); }
+                    static ctx::Handle ctxHandle() noexcept { return instance().ctxHandle(); }
                     static State &state() noexcept {
                         fstd_dbg_assert(isInit());
                         return *GlobalData::get().state;
@@ -6948,7 +6980,7 @@ namespace fstd {
             constexpr Cfg() noexcept : Cfg(DefaultProfile, {}) {};
             constexpr Cfg(Profile profile, Slice<const FeatureRequest> features) noexcept :
                 FSTD_ModulesCfg{
-                        .id = {.id = static_cast<FSTD_CfgId>(CfgId::Modules)},
+                        .id = {.id = static_cast<FSTD_CfgId>(ctx::CfgId::Modules)},
                         .profile = static_cast<FSTD_ModulesProfile>(profile),
                         .features = features,
                 } {};
