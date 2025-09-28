@@ -51,10 +51,11 @@ pub const SymbolIdExt = extern struct {
 
 pub const SymbolExport = extern struct {
     symbol: SymbolIdExt,
-    sym_ty: enum(i32) { static = 0, dynamic = 1, _ },
+    sym_ty: enum(i32) { static = 0, state_offset = 1, dynamic = 2, _ },
     linkage: enum(i32) { global = 0, _ },
     value: extern union {
         static: *const anyopaque,
+        state_offset: usize,
         dynamic: extern struct {
             poll_init: *const fn (
                 ctx: *modules.OpaqueInstance,
@@ -106,7 +107,7 @@ pub const events = struct {
     };
     pub const Deinit = extern struct {
         tag: Tag = .deinit,
-        poll: ?*const fn (ctx: *modules.OpaqueInstance, waker: tasks.Waker, state: *anyopaque) callconv(.c) bool = null,
+        poll: ?*const fn (ctx: *modules.OpaqueInstance, waker: tasks.Waker, state: ?*anyopaque) callconv(.c) bool = null,
     };
     pub const Start = extern struct {
         tag: Tag = .start,
@@ -254,7 +255,7 @@ pub fn Module(T: type) type {
     comptime var ev_deinit_poll: ?*const fn (
         ctx: *modules.OpaqueInstance,
         waker: tasks.Waker,
-        state: *anyopaque,
+        state: ?*anyopaque,
     ) callconv(.c) bool = null;
 
     comptime var ev_start_poll: ?*const fn (
@@ -652,7 +653,7 @@ pub fn Module(T: type) type {
             const ev_deinit = T.fimo_events.deinit;
             const wrapper = struct {
                 const Sync = struct {
-                    fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker, state: *anyopaque) callconv(.c) bool {
+                    fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker, state: ?*anyopaque) callconv(.c) bool {
                         _ = inst;
                         _ = waker;
                         _ = state;
@@ -673,7 +674,7 @@ pub fn Module(T: type) type {
                     }
 
                     var future: ?Inner = null;
-                    fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker, state: *anyopaque) callconv(.c) bool {
+                    fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker, state: ?*anyopaque) callconv(.c) bool {
                         _ = inst;
                         _ = state;
 
@@ -701,7 +702,7 @@ pub fn Module(T: type) type {
             };
         } else {
             const wrapper = struct {
-                fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker, state: *anyopaque) callconv(.c) bool {
+                fn poll(inst: *modules.OpaqueInstance, waker: tasks.Waker, state: ?*anyopaque) callconv(.c) bool {
                     _ = inst;
                     _ = waker;
                     _ = state;

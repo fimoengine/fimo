@@ -1135,6 +1135,15 @@ pub const InitExportedOp = FSMFuture(struct {
             const exp = exports[self.export_index];
             const sym, const dtor = switch (exp.sym_ty) {
                 .static => .{ exp.value.static, null },
+                .state_offset => blk: {
+                    const offset = exp.value.state_offset;
+                    const state: [*]const u8 = @ptrCast(self.instance.state orelse {
+                        self.ret = error.StateOffsetButNotState;
+                        return .next;
+                    });
+                    const sym: *const anyopaque = state + offset;
+                    break :blk .{ sym, null };
+                },
                 .dynamic => blk: {
                     var result: Fallible(*anyopaque) = undefined;
                     if (!exp.value.dynamic.poll_init(@ptrCast(self.instance), waker, &result)) return .yield;

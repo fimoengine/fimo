@@ -562,7 +562,7 @@ pub fn Instance(comptime config: InstanceConfig) type {
             exports: if (Exports == anyopaque or @sizeOf(Exports) == 0) ?*const Exports else *const Exports,
             handle: *Handle,
             ctx_handle: *ctx.Handle,
-            state: *State,
+            state: if (State == anyopaque or @sizeOf(State) == 0) ?*State else *State,
         };
 
         const Self = @This();

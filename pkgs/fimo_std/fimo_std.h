@@ -109,13 +109,13 @@
 #endif
 
 #if defined(_WIN32)
-#define FSTD_PLATFORM_WINDOWS
+#define FSTD_PLATFORM_WINDOWS 1
 #elif defined(__APPLE__)
-#define FSTD_PLATFORM_APPLE
-#define FSTD_PLATFORM_POSIX
+#define FSTD_PLATFORM_APPLE 1
+#define FSTD_PLATFORM_POSIX 1
 #elif defined(__linux__)
-#define FSTD_PLATFORM_LINUX
-#define FSTD_PLATFORM_POSIX
+#define FSTD_PLATFORM_LINUX 1
+#define FSTD_PLATFORM_POSIX 1
 #else
 #error "unknown platform"
 #endif
@@ -977,7 +977,7 @@ typedef struct {
     }
 
 /// A result instance indicating no error.
-fstd_internal const FSTD_Result FSTD_Result_Ok = {
+fstd_internal FSTD_CONSTEXPR FSTD_Result FSTD_Result_Ok = {
         .data = fstd_nullptr,
         .vtable = &FSTD__ResultVtable_Ok,
 };
@@ -3279,8 +3279,8 @@ typedef struct {
     FSTD_ModuleParamTag tag;
     FSTD_ModuleAccessGroup read_group;
     FSTD_ModuleAccessGroup write_group;
-    void (*read)(FSTD_ModuleParamData data, void *value);
-    void (*write)(FSTD_ModuleParamData data, const void *value);
+    void (*FSTD_MAYBE_NULL read)(FSTD_ModuleParamData data, void *value);
+    void (*FSTD_MAYBE_NULL write)(FSTD_ModuleParamData data, const void *value);
     union {
         FSTD_U8 u8;
         FSTD_U16 u16;
@@ -3304,7 +3304,8 @@ typedef struct {
 typedef FSTD_I32 FSTD_ModuleExportSymbolType;
 enum {
     FSTD_ModuleExportSymbolType_Static = (FSTD_ModuleExportSymbolType)0,
-    FSTD_ModuleExportSymbolType_Dynamic = (FSTD_ModuleExportSymbolType)1,
+    FSTD_ModuleExportSymbolType_StateOffset = (FSTD_ModuleExportSymbolType)1,
+    FSTD_ModuleExportSymbolType_Dynamic = (FSTD_ModuleExportSymbolType)2,
     FSTD__ModuleExportSymbolType_ = FSTD_I32_MAX,
 };
 
@@ -3365,7 +3366,7 @@ typedef struct {
 
 typedef struct {
     FSTD_ModuleExportEventTag tag;
-    bool (*FSTD_MAYBE_NULL poll)(FSTD_ModuleInstance *ctx, FSTD_TaskWaker waker, void *state);
+    bool (*FSTD_MAYBE_NULL poll)(FSTD_ModuleInstance *ctx, FSTD_TaskWaker waker, void *FSTD_MAYBE_NULL state);
 } FSTD_ModuleExportEventDeinit;
 
 typedef struct {
@@ -3496,29 +3497,57 @@ fstd_util void fstd_module_export_default_on_event(const FSTD_ModuleExport *modu
 #endif
 
 #ifdef __cplusplus
-#define FSTD_SYM(name, id_, type)                                                                                      \
-    fstd_func const type *FSTD_CONCAT(name, __get)(void);                                                              \
-    fstd_func void FSTD_CONCAT(name, __bind)(const void *ptr);                                                         \
-    fstd_func void FSTD_CONCAT(name, __unbind)(void);                                                                  \
-    fstd_glob FSTD__RefCountedHandle FSTD_CONCAT(name, __Handle);                                                      \
-    fstd_internal constexpr FSTD_ModuleSymbol FSTD_CONCAT(name, _Id) = id_;                                            \
-    fstd_internal constexpr FSTD_ModuleSymbolExt name = {                                                              \
+#define FSTD_SYM(name_, id_, type)                                                                                     \
+    fstd_func const type *FSTD_CONCAT(name_, __get)(void);                                                             \
+    fstd_func void FSTD_CONCAT(name_, __bind)(const void *ptr);                                                        \
+    fstd_func void FSTD_CONCAT(name_, __unbind)(void);                                                                 \
+    fstd_internal constexpr auto FSTD_CONCAT(name_, __Cxx) = [] {                                                      \
+        FSTD_ModuleSymbol sym_id = id_;                                                                                \
+        return ::fstd::modules::Symbol<type>{                                                                          \
+                {sym_id.name.ptr, sym_id.name.len},                                                                    \
+                {sym_id.ns.ptr, sym_id.ns.len},                                                                        \
+                {sym_id.version},                                                                                      \
+        };                                                                                                             \
+    }();                                                                                                               \
+    fstd_internal constexpr FSTD_ModuleSymbol FSTD_CONCAT(name_, _Id) = id_;                                           \
+    fstd_internal constexpr FSTD_ModuleSymbolExt name_ = {                                                             \
             .id = id_,                                                                                                 \
-            .bind = FSTD_CONCAT(name, __bind),                                                                         \
-            .unbind = FSTD_CONCAT(name, __unbind),                                                                     \
+            .bind = FSTD_CONCAT(name_, __bind),                                                                        \
+            .unbind = FSTD_CONCAT(name_, __unbind),                                                                    \
     };
 
-#define FSTD_SYM_FN(name, id_, ret, ...)                                                                               \
-    fstd_func ret (*FSTD_CONCAT(name, __get)(void))(__VA_ARGS__);                                                      \
-    fstd_func void FSTD_CONCAT(name, __bind)(const void *ptr);                                                         \
-    fstd_func void FSTD_CONCAT(name, __unbind)(void);                                                                  \
-    fstd_glob FSTD__RefCountedHandle FSTD_CONCAT(name, __Handle);                                                      \
-    fstd_internal constexpr FSTD_ModuleSymbol FSTD_CONCAT(name, _Id) = id_;                                            \
-    fstd_internal constexpr FSTD_ModuleSymbolExt name = {                                                              \
+#define FSTD_SYM_FN(name_, id_, ret, ...)                                                                              \
+    fstd_func ret (*FSTD_CONCAT(name_, __get)(void))(__VA_ARGS__);                                                     \
+    fstd_func void FSTD_CONCAT(name_, __bind)(const void *ptr);                                                        \
+    fstd_func void FSTD_CONCAT(name_, __unbind)(void);                                                                 \
+    fstd_internal constexpr auto FSTD_CONCAT(name_, __Cxx) = [] {                                                      \
+        FSTD_ModuleSymbol sym_id = id_;                                                                                \
+        return ::fstd::modules::Symbol<ret (*)(__VA_ARGS__)>{                                                          \
+                {sym_id.name.ptr, sym_id.name.len},                                                                    \
+                {sym_id.ns.ptr, sym_id.ns.len},                                                                        \
+                {sym_id.version},                                                                                      \
+        };                                                                                                             \
+    }();                                                                                                               \
+    fstd_internal constexpr FSTD_ModuleSymbol FSTD_CONCAT(name_, _Id) = id_;                                           \
+    fstd_internal constexpr FSTD_ModuleSymbolExt name_ = {                                                             \
             .id = id_,                                                                                                 \
-            .bind = FSTD_CONCAT(name, __bind),                                                                         \
-            .unbind = FSTD_CONCAT(name, __unbind),                                                                     \
+            .bind = FSTD_CONCAT(name_, __bind),                                                                        \
+            .unbind = FSTD_CONCAT(name_, __unbind),                                                                    \
     };
+
+#define FSTD_SYM_IMP(name, type)                                                                                       \
+    fstd_func_impl const type *FSTD_CONCAT(name, __get)(void) { return FSTD_CONCAT(name, __Cxx).getPtr(); }            \
+    fstd_func_impl void FSTD_CONCAT(name, __bind)(const void *ptr) {                                                   \
+        FSTD_CONCAT(name, __Cxx).bind(::fstd::modules::SymbolUtil<type>::refFromPtr(ptr));                             \
+    }                                                                                                                  \
+    fstd_func_impl void FSTD_CONCAT(name, __unbind)(void) { FSTD_CONCAT(name, __Cxx).unbind(); }
+
+#define FSTD_SYM_FN_IMP(name, ret, ...)                                                                                \
+    fstd_func_impl ret (*FSTD_CONCAT(name, __get)(void))(__VA_ARGS__) { return FSTD_CONCAT(name, __Cxx).getPtr(); }    \
+    fstd_func_impl void FSTD_CONCAT(name, __bind)(const void *ptr) {                                                   \
+        FSTD_CONCAT(name, __Cxx).bind(::fstd::modules::SymbolUtil<ret (*)(__VA_ARGS__)>::refFromPtr(ptr));             \
+    }                                                                                                                  \
+    fstd_func_impl void FSTD_CONCAT(name, __unbind)(void) { FSTD_CONCAT(name, __Cxx).unbind(); }
 #else
 #define FSTD_SYM(name, id_, type)                                                                                      \
     fstd_func const type *FSTD_CONCAT(name, __get)(void);                                                              \
@@ -3543,7 +3572,6 @@ fstd_util void fstd_module_export_default_on_event(const FSTD_ModuleExport *modu
             .bind = FSTD_CONCAT(name, __bind),                                                                         \
             .unbind = FSTD_CONCAT(name, __unbind),                                                                     \
     };
-#endif
 
 #define FSTD_SYM_IMP(name, type)                                                                                       \
     fstd_func_impl const type *FSTD_CONCAT(name, __get)(void) {                                                        \
@@ -3557,7 +3585,6 @@ fstd_util void fstd_module_export_default_on_event(const FSTD_ModuleExport *modu
     }                                                                                                                  \
     fstd_glob_impl FSTD__RefCountedHandle FSTD_CONCAT(name, __Handle);
 
-
 #define FSTD_SYM_FN_IMP(name, ret, ...)                                                                                \
     fstd_func_impl ret (*FSTD_CONCAT(name, __get)(void))(__VA_ARGS__) {                                                \
         return (ret (*)(__VA_ARGS__))FSTD_CONCAT(name, __Handle).handle;                                               \
@@ -3569,6 +3596,7 @@ fstd_util void fstd_module_export_default_on_event(const FSTD_ModuleExport *modu
         fstd__ref_counted_handle_unregister(&FSTD_CONCAT(name, __Handle));                                             \
     }                                                                                                                  \
     fstd_glob_impl FSTD__RefCountedHandle FSTD_CONCAT(name, __Handle);
+#endif
 
 #define FSTD_MODULE_EXPORT() FSTD_MODULE_EXPORT_NAMED(FSTD_IDENT(fstd__module_export_))
 #define FSTD_MODULE_EXPORT_NAMED(name) FSTD__MODULE_EXPORT(name, FSTD_IDENT(FSTD_CONCAT(fstd__module_export_, name)))
@@ -3761,6 +3789,7 @@ struct FSTD_Ctx {
 // -----------------------------------------
 
 #ifdef __cplusplus
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <bit>
@@ -3770,6 +3799,7 @@ struct FSTD_Ctx {
 #include <format>
 #include <iterator>
 #include <memory>
+#include <new>
 #include <optional>
 #include <source_location>
 #include <string>
@@ -3853,9 +3883,9 @@ namespace fstd {
         using ConstReverseIterator = std::reverse_iterator<const T *>;
 
         constexpr Slice() noexcept = default;
-        constexpr Slice(T *it) noexcept
-            requires std::is_same_v<std::remove_const_t<T>, char>
-            : ptr{it}, len{std::char_traits<std::remove_const_t<T>>::length(it)} {}
+        // constexpr Slice(T *it) noexcept
+        //     requires std::is_same_v<std::remove_const_t<T>, char>
+        //     : ptr{it}, len{std::char_traits<std::remove_const_t<T>>::length(it)} {}
         template<typename It>
         constexpr Slice(It first, usize count) noexcept : ptr{std::to_address(first)}, len{count} {}
         template<typename It, typename End>
@@ -3898,7 +3928,248 @@ namespace fstd {
         }
     };
 
+    struct StrConst : FSTD_StrConst {
+        using Type = StrConst;
+        using FStd = FSTD_StrConst;
+        using ValueType = char;
+        using SizeType = usize;
+        using DifferenceType = isize;
+        using Pointer = char *;
+        using ConstPointer = const char *;
+        using Reference = char &;
+        using ConstReference = const char &;
+        using Iterator = const char *;
+        using ConstIterator = const char *;
+        using ReverseIterator = std::reverse_iterator<Iterator>;
+        using ConstReverseIterator = std::reverse_iterator<const char *>;
+
+        constexpr StrConst() noexcept = default;
+        constexpr StrConst(const char *it) noexcept : StrConst(it, std::char_traits<char>::length(it)) {};
+        template<typename It>
+        constexpr StrConst(It first, usize count) noexcept :
+            FSTD_StrConst{.ptr = std::to_address(first), .len = count} {}
+        template<typename It, typename End>
+        constexpr StrConst(It first, End last) noexcept : StrConst(first, last - first) {}
+        template<usize N>
+        constexpr StrConst(std::type_identity_t<const char> (&arr)[N]) noexcept : StrConst(arr, N) {}
+        template<typename T, usize N>
+        constexpr StrConst(std::array<T, N> &arr) noexcept : StrConst(arr.data(), N) {}
+        template<typename T, usize N>
+        constexpr StrConst(const std::array<T, N> &arr) noexcept : StrConst(arr.data(), N) {}
+        constexpr StrConst(const Slice<char> &slice) noexcept : StrConst(slice.data(), slice.size()) {}
+        constexpr StrConst(const Slice<const char> &slice) noexcept : StrConst(slice.data(), slice.size()) {}
+        constexpr StrConst(const FStd &other) noexcept : FStd(other) {};
+        constexpr StrConst(const StrConst &) noexcept = default;
+        constexpr StrConst(StrConst &&) noexcept = default;
+
+        constexpr StrConst &operator=(const StrConst &) noexcept = default;
+        constexpr StrConst &operator=(StrConst &&) noexcept = default;
+
+        friend constexpr auto operator<=>(StrConst lhs, StrConst rhs) noexcept {
+            return std::lexicographical_compare_three_way(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
+        }
+        friend constexpr bool operator==(StrConst lhs, StrConst rhs) noexcept { return (lhs <=> rhs) == 0; }
+        friend constexpr bool operator!=(StrConst lhs, StrConst rhs) noexcept { return (lhs <=> rhs) != 0; }
+        friend constexpr bool operator<(StrConst lhs, StrConst rhs) noexcept { return (lhs <=> rhs) < 0; }
+        friend constexpr bool operator<=(StrConst lhs, StrConst rhs) noexcept { return (lhs <=> rhs) <= 0; }
+        friend constexpr bool operator>(StrConst lhs, StrConst rhs) noexcept { return (lhs <=> rhs) > 0; }
+        friend constexpr bool operator>=(StrConst lhs, StrConst rhs) noexcept { return (lhs <=> rhs) >= 0; }
+
+        constexpr Iterator begin() const noexcept { return ptr; }
+        constexpr ConstIterator cbegin() const noexcept { return ptr; }
+
+        constexpr Iterator end() const noexcept { return ptr + len; }
+        constexpr ConstIterator cend() const noexcept { return ptr + len; }
+
+        constexpr ReverseIterator rbegin() const noexcept { return ReverseIterator{ptr + len}; }
+        constexpr ConstReverseIterator crbegin() const noexcept { return ConstReverseIterator{ptr + len}; }
+
+        constexpr ReverseIterator rend() const noexcept { return ReverseIterator{ptr}; }
+        constexpr ConstReverseIterator crend() const noexcept { return ConstReverseIterator{ptr}; }
+
+        constexpr ConstReference front() const noexcept { return ptr[0]; }
+        constexpr ConstReference back() const noexcept { return ptr[len - 1]; }
+        constexpr ConstReference operator[](usize idx) const noexcept { return ptr[idx]; }
+        constexpr ConstPointer data() const noexcept { return ptr; }
+        constexpr usize size() const noexcept { return len; }
+        constexpr usize sizeBytes() const noexcept { return len * sizeof(*ptr); }
+        constexpr bool empty() const noexcept { return len == 0; }
+    };
+
     using Uuid = FSTD_Uuid;
+
+    namespace detail {
+        template<auto Value>
+        struct StaticValue {};
+
+        template<auto>
+        struct MemberPointerInfo;
+        template<typename T, typename U, T U::*Member>
+        struct MemberPointerInfo<Member> {
+            using Type = T;
+            using Base = U;
+        };
+
+#pragma pack(push, 1)
+        template<auto Member, typename Parent, usize Offset>
+            requires std::is_standard_layout_v<Parent>
+        union OffsetOfUnion;
+        template<typename T, typename Base, T Base::*Member, typename Parent, usize Offset>
+        union OffsetOfUnion<Member, Parent, Offset> {
+            struct {
+                char padding[Offset];
+                T member;
+            };
+            Parent parent;
+            Base base;
+        };
+#pragma pack(pop)
+
+        template<auto Member, typename Base, usize Low, usize High>
+        consteval usize offsetOfImpl() {
+            constexpr usize Middle = Low + ((High - Low) / 2);
+            if constexpr (Low == Middle) {
+                return Middle;
+            }
+            else {
+                OffsetOfUnion<Member, Base, Middle> dummy = {};
+                if constexpr (&(dummy.parent.*Member) < &dummy.member) {
+                    return offsetOfImpl<Member, Base, Low, Middle>();
+                }
+                else {
+                    return offsetOfImpl<Member, Base, Middle, High>();
+                }
+            }
+        }
+
+        template<auto Member>
+        consteval usize offsetOf() {
+            using Base = typename MemberPointerInfo<Member>::Base;
+            return offsetOfImpl<Member, Base, 0, sizeof(Base)>();
+        }
+
+        template<typename F, typename Ret, typename... Args>
+        concept InvocableWithReturn = std::invocable<F, Args...> && requires(F &&f) {
+            { f() } -> std::same_as<Ret>;
+        };
+
+        template<InvocableWithReturn<void> F>
+        struct [[nodiscard]] ScopeGuard final {
+            F callback;
+            bool active;
+
+            using CallbackType = F;
+            ScopeGuard() noexcept = delete;
+            explicit ScopeGuard(F &&callback) noexcept(std::is_nothrow_constructible_v<F, F &&>) :
+                callback(std::forward<F>(callback)), active(true) {}
+            ScopeGuard(const ScopeGuard &other) noexcept = delete;
+            ScopeGuard &operator=(const ScopeGuard &other) noexcept = delete;
+            ScopeGuard &operator=(ScopeGuard &&other) noexcept = delete;
+            ~ScopeGuard() noexcept {
+                if (this->active)
+                    this->callback();
+            }
+            void dismiss() noexcept { this->active = false; }
+        };
+
+        inline void expectedNullTerminatedArray() {}
+        template<std::size_t N>
+        struct ConstString {
+            char str[N]{};
+
+            static constexpr std::size_t size = N - 1;
+
+            consteval ConstString() {}
+            consteval ConstString(const char (&new_str)[N]) {
+                if (new_str[N - 1] != '\0')
+                    expectedNullTerminatedArray();
+                std::copy_n(new_str, size, str);
+            }
+        };
+
+        template<typename... Args>
+        struct FormatString_ {
+            std::format_string<Args...> fmt;
+            std::source_location loc = std::source_location::current();
+
+            template<class T>
+                requires std::constructible_from<std::format_string<Args...>, T const &>
+            consteval FormatString_(T const &fmt, std::source_location loc = std::source_location::current()) :
+                fmt(fmt), loc(loc){};
+        };
+
+        template<typename... Args>
+        using FormatString = detail::FormatString_<std::type_identity_t<Args>...>;
+
+        static constexpr int maximum(int a, int b) {
+            if (a > b)
+                return a;
+            return b;
+        }
+        template<int index, typename A = void, typename... Args>
+        struct ArgType {
+            using type = typename std::conditional<index == 0, A,
+                                                   typename ArgType<maximum(index - 1, 0), Args...>::type>::type;
+        };
+
+        template<typename T>
+        struct ArgType<0, T> {
+            using type = T;
+        };
+
+        template<typename... Args>
+        struct Tuple {
+            struct MembersEnd {};
+
+            template<usize index, typename M = MembersEnd, typename... Membs>
+            struct TupleMembers {
+                M member;
+                typename std::conditional<sizeof...(Membs) == 0, MembersEnd, TupleMembers<index + 1, Membs...>>::type
+                        nextMember;
+                static constexpr usize getIndex() { return index; };
+            };
+            TupleMembers<0, Args...> members;
+
+            template<usize index, typename Ret, typename T>
+            constexpr Ret &getMemberFromHolder(T &holder) {
+                if constexpr (T::getIndex() == index)
+                    return holder.member;
+                else
+                    return getMemberFromHolder<index, Ret>(holder.nextMember);
+            };
+
+            template<usize index>
+            constexpr ArgType<index, Args...>::type &getMember() {
+                return getMemberFromHolder<index, typename ArgType<index, Args...>::type>(members);
+            }
+        };
+
+        struct ConstUnknownSlice {
+            void const *ptr;
+            usize len;
+
+            constexpr ConstUnknownSlice() noexcept = default;
+            template<typename It>
+            constexpr ConstUnknownSlice(It first, usize count) noexcept : ptr{std::to_address(first)}, len{count} {}
+            template<typename It, typename End>
+            constexpr ConstUnknownSlice(It first, End last) noexcept : ptr{std::to_address(first)}, len{last - first} {}
+            template<typename U, usize N>
+            constexpr ConstUnknownSlice(std::array<U, N> &arr) noexcept : ptr{arr.data()}, len{N} {}
+            template<typename U, usize N>
+            constexpr ConstUnknownSlice(const std::array<U, N> &arr) noexcept : ptr{arr.data()}, len{N} {}
+            constexpr ConstUnknownSlice(const ConstUnknownSlice &) noexcept = default;
+            constexpr ConstUnknownSlice(ConstUnknownSlice &&) noexcept = default;
+
+            constexpr ConstUnknownSlice &operator=(const ConstUnknownSlice &) noexcept = default;
+            constexpr ConstUnknownSlice &operator=(ConstUnknownSlice &&) noexcept = default;
+        };
+    } // namespace detail
+
+    template<detail::InvocableWithReturn<void> Callback>
+    inline static detail::ScopeGuard<Callback> makeScopeGuard(Callback &&callback) noexcept(
+            std::is_nothrow_constructible_v<detail::ScopeGuard<Callback>, Callback &&>) {
+        return detail::ScopeGuard{std::forward<Callback>(callback)};
+    }
 
     // -----------------------------------------
     // memory ----------------------------------
@@ -4079,6 +4350,7 @@ namespace fstd {
             return fstd_result_write(*this, dst, offset, &remaining);
         }
     };
+    constexpr static Result ResultOk = FSTD_Result_Ok;
 
     template<>
     inline Result Result::init(PlatformError err) noexcept {
@@ -4098,14 +4370,20 @@ namespace fstd {
         constexpr Version(Version &&other) noexcept = default;
         constexpr Version &operator=(const Version &other) noexcept = default;
         constexpr Version &operator=(Version &&other) noexcept = default;
-        friend constexpr std::strong_ordering operator<=>(Version lhs, Version rhs) {
+        friend constexpr std::partial_ordering operator<=>(Version lhs, Version rhs) {
             auto order = fstd_version_order(&lhs, &rhs);
             if (order < 0)
-                return std::strong_ordering::less;
+                return std::partial_ordering::less;
             if (order > 0)
-                return std::strong_ordering::greater;
-            return std::strong_ordering::equivalent;
+                return std::partial_ordering::greater;
+            return std::partial_ordering::equivalent;
         }
+        friend constexpr bool operator==(Version lhs, Version rhs) noexcept { return (lhs <=> rhs) == 0; }
+        friend constexpr bool operator!=(Version lhs, Version rhs) noexcept { return (lhs <=> rhs) != 0; }
+        friend constexpr bool operator<(Version lhs, Version rhs) noexcept { return (lhs <=> rhs) < 0; }
+        friend constexpr bool operator<=(Version lhs, Version rhs) noexcept { return (lhs <=> rhs) <= 0; }
+        friend constexpr bool operator>(Version lhs, Version rhs) noexcept { return (lhs <=> rhs) > 0; }
+        friend constexpr bool operator>=(Version lhs, Version rhs) noexcept { return (lhs <=> rhs) >= 0; }
 
         bool sattisfies(const Version &required) const noexcept { return fstd_version_sattisfies(this, &required); }
     };
@@ -4146,6 +4424,12 @@ namespace fstd {
                 return std::strong_ordering::greater;
             return std::strong_ordering::equivalent;
         }
+        friend constexpr bool operator==(Duration lhs, Duration rhs) noexcept { return (lhs <=> rhs) == 0; }
+        friend constexpr bool operator!=(Duration lhs, Duration rhs) noexcept { return (lhs <=> rhs) != 0; }
+        friend constexpr bool operator<(Duration lhs, Duration rhs) noexcept { return (lhs <=> rhs) < 0; }
+        friend constexpr bool operator<=(Duration lhs, Duration rhs) noexcept { return (lhs <=> rhs) <= 0; }
+        friend constexpr bool operator>(Duration lhs, Duration rhs) noexcept { return (lhs <=> rhs) > 0; }
+        friend constexpr bool operator>=(Duration lhs, Duration rhs) noexcept { return (lhs <=> rhs) >= 0; }
 
         static constexpr auto initSecs(u64 s) -> Duration { return {FSTD_SECONDS(s)}; }
         static constexpr auto initMillis(u64 ms) -> Duration { return {FSTD_MILLIS(ms)}; }
@@ -4211,6 +4495,12 @@ namespace fstd {
                 return std::strong_ordering::greater;
             return std::strong_ordering::equivalent;
         }
+        friend constexpr bool operator==(Time lhs, Time rhs) noexcept { return (lhs <=> rhs) == 0; }
+        friend constexpr bool operator!=(Time lhs, Time rhs) noexcept { return (lhs <=> rhs) != 0; }
+        friend constexpr bool operator<(Time lhs, Time rhs) noexcept { return (lhs <=> rhs) < 0; }
+        friend constexpr bool operator<=(Time lhs, Time rhs) noexcept { return (lhs <=> rhs) <= 0; }
+        friend constexpr bool operator>(Time lhs, Time rhs) noexcept { return (lhs <=> rhs) > 0; }
+        friend constexpr bool operator>=(Time lhs, Time rhs) noexcept { return (lhs <=> rhs) >= 0; }
 
         static Time now() noexcept { return {fstd_time_now()}; }
         static std::expected<Duration, Result> elapsed(Time from) noexcept {
@@ -4280,6 +4570,12 @@ namespace fstd {
                 return std::strong_ordering::greater;
             return std::strong_ordering::equivalent;
         }
+        friend constexpr bool operator==(Instant lhs, Instant rhs) noexcept { return (lhs <=> rhs) == 0; }
+        friend constexpr bool operator!=(Instant lhs, Instant rhs) noexcept { return (lhs <=> rhs) != 0; }
+        friend constexpr bool operator<(Instant lhs, Instant rhs) noexcept { return (lhs <=> rhs) < 0; }
+        friend constexpr bool operator<=(Instant lhs, Instant rhs) noexcept { return (lhs <=> rhs) <= 0; }
+        friend constexpr bool operator>(Instant lhs, Instant rhs) noexcept { return (lhs <=> rhs) > 0; }
+        friend constexpr bool operator>=(Instant lhs, Instant rhs) noexcept { return (lhs <=> rhs) >= 0; }
 
         static Instant now() noexcept { return {fstd_instant_now()}; }
         static std::expected<Duration, Result> elapsed(Instant from) noexcept {
@@ -4348,9 +4644,9 @@ namespace fstd {
         }
 
         Result push(Path path) noexcept;
-        Result push(Slice<const char> path) noexcept;
+        Result push(StrConst path) noexcept;
         Result push(const Allocator &alloc, Path path) noexcept;
-        Result push(const Allocator &alloc, Slice<const char> path) noexcept;
+        Result push(const Allocator &alloc, StrConst path) noexcept;
 
         bool pop() noexcept { return fstd_path_buf_pop(this); }
 
@@ -4378,7 +4674,7 @@ namespace fstd {
         constexpr Path &operator=(const Path &other) noexcept = default;
         constexpr Path &operator=(Path &&other) noexcept = default;
 
-        static std::expected<Path, Result> init(Slice<const char> path) noexcept {
+        static std::expected<Path, Result> init(StrConst path) noexcept {
             Path p{};
             Result status = fstd_path_init(&p, path);
             if (status.isErr())
@@ -4488,11 +4784,11 @@ namespace fstd {
     inline constexpr Path PathBuf::asPath() const noexcept { return {{this->ptr, this->len}}; }
 
     inline Result PathBuf::push(Path path) noexcept { return fstd_path_buf_push(this, path); }
-    inline Result PathBuf::push(Slice<const char> path) noexcept { return fstd_path_buf_push_str(this, path); }
+    inline Result PathBuf::push(StrConst path) noexcept { return fstd_path_buf_push_str(this, path); }
     inline Result PathBuf::push(const Allocator &alloc, Path path) noexcept {
         return fstd_path_buf_push_alloc(this, alloc, path);
     }
-    inline Result PathBuf::push(const Allocator &alloc, Slice<const char> path) noexcept {
+    inline Result PathBuf::push(const Allocator &alloc, StrConst path) noexcept {
         return fstd_path_buf_push_str_alloc(this, alloc, path);
     }
 
@@ -4552,114 +4848,143 @@ namespace fstd {
     // async subsystem -------------------------
     // -----------------------------------------
 
-    struct TaskWaker : FSTD_TaskWaker {
-        using Type = TaskWaker;
-        using FStd = FSTD_TaskWaker;
-        constexpr TaskWaker() noexcept = default;
-        constexpr TaskWaker(const FStd &other) noexcept : FStd(other) {};
-        constexpr TaskWaker(const TaskWaker &other) noexcept = default;
-        constexpr TaskWaker(TaskWaker &&other) noexcept = default;
-        constexpr TaskWaker &operator=(const TaskWaker &other) noexcept = default;
-        constexpr TaskWaker &operator=(TaskWaker &&other) noexcept = default;
+    namespace tasks {
+        struct Waker : FSTD_TaskWaker {
+            using Type = Waker;
+            using FStd = FSTD_TaskWaker;
+            constexpr Waker() noexcept = default;
+            constexpr Waker(const FStd &other) noexcept : FStd(other) {};
+            constexpr Waker(const Waker &other) noexcept = default;
+            constexpr Waker(Waker &&other) noexcept = default;
+            constexpr Waker &operator=(const Waker &other) noexcept = default;
+            constexpr Waker &operator=(Waker &&other) noexcept = default;
 
-        TaskWaker ref() const noexcept { return fstd_task_waker_ref(*this); }
-        void unref() const noexcept { return fstd_task_waker_unref(*this); }
-        void wakeUnref() const noexcept { return fstd_task_waker_wake_unref(*this); }
-        void wake() const noexcept { return fstd_task_waker_wake(*this); }
-    };
+            Waker ref() const noexcept { return fstd_task_waker_ref(*this); }
+            void unref() const noexcept { return fstd_task_waker_unref(*this); }
+            void wakeUnref() const noexcept { return fstd_task_waker_wake_unref(*this); }
+            void wake() const noexcept { return fstd_task_waker_wake(*this); }
+        };
 
-    struct PollPendingType {};
-    static constexpr PollPendingType PollPending{};
+        template<typename T>
+        struct PollUtil {
+            using ValueType = T;
+        };
+        template<>
+        struct PollUtil<void> {
+            using ValueType = std::monostate;
+        };
 
-    template<typename T>
-    using PollResult = std::variant<T, PollPendingType>;
+        struct PollPendingType {};
+        static constexpr PollPendingType PollPending{};
 
-    template<typename T>
-    concept Awaitable = requires(T a, const TaskWaker &waker) {
-        typename T::ResultType;
-        { a.poll(waker) } -> std::same_as<PollResult<typename T::ResultType>>;
-    };
+        template<typename T>
+        using PollResult = std::variant<typename PollUtil<T>::ValueType, PollPendingType>;
 
-    struct TaskWaiter : FSTD_TaskWaiter {
-        using Type = TaskWaiter;
-        using FStd = FSTD_TaskWaiter;
-        constexpr TaskWaiter() noexcept = default;
-        constexpr TaskWaiter(const FStd &other) noexcept : FStd(other) {};
-        constexpr TaskWaiter(const TaskWaiter &other) noexcept = default;
-        constexpr TaskWaiter(TaskWaiter &&other) noexcept = default;
-        constexpr TaskWaiter &operator=(const TaskWaiter &other) noexcept = default;
-        constexpr TaskWaiter &operator=(TaskWaiter &&other) noexcept = default;
+        template<typename T>
+        concept Awaitable = requires(T a, const Waker &waker) {
+            typename T::ResultType;
+            { a.poll(waker) } -> std::same_as<PollResult<typename T::ResultType>>;
+        };
 
-        static std::expected<TaskWaiter, Status> init() noexcept {
-            TaskWaiter waiter{};
-            auto status = static_cast<Status>(fstd_waiter_init(&waiter));
-            if (status != Status::Ok)
-                return std::unexpected(status);
-            return waiter;
-        }
-        void deinit() const noexcept { return fstd_waiter_deinit(*this); }
-        TaskWaker waker() const noexcept { return fstd_waiter_waker(*this); }
-        void block() const noexcept { return fstd_waiter_block(*this); }
-        auto await(Awaitable auto &fut) const noexcept -> typename std::remove_cvref_t<decltype(fut)>::ResultType {
-            TaskWaker waker = this->waker();
-            for (;;) {
-                auto status = fut.poll(waker);
-                if (status.index() != 0) {
-                    this->block();
-                }
-                else {
-                    return std::get<0>(status);
+        struct Waiter : FSTD_TaskWaiter {
+            using Type = Waiter;
+            using FStd = FSTD_TaskWaiter;
+            constexpr Waiter() noexcept = default;
+            constexpr Waiter(const FStd &other) noexcept : FStd(other) {};
+            constexpr Waiter(const Waiter &other) noexcept = default;
+            constexpr Waiter(Waiter &&other) noexcept = default;
+            constexpr Waiter &operator=(const Waiter &other) noexcept = default;
+            constexpr Waiter &operator=(Waiter &&other) noexcept = default;
+
+            static std::expected<Waiter, Status> init() noexcept {
+                Waiter waiter{};
+                auto status = static_cast<Status>(fstd_waiter_init(&waiter));
+                if (status != Status::Ok)
+                    return std::unexpected(status);
+                return waiter;
+            }
+            void deinit() const noexcept { return fstd_waiter_deinit(*this); }
+            Waker waker() const noexcept { return fstd_waiter_waker(*this); }
+            void block() const noexcept { return fstd_waiter_block(*this); }
+            auto await(Awaitable auto &fut) const noexcept -> typename std::remove_cvref_t<decltype(fut)>::ResultType {
+                Waker waker = this->waker();
+                for (;;) {
+                    auto status = fut.poll(waker);
+                    if (status.index() != 0) {
+                        this->block();
+                    }
+                    else {
+                        return std::get<0>(status);
+                    }
                 }
             }
-        }
-    };
+        };
 
-    template<typename T>
-    struct OpaqueFuture {
-        using ResultType = T;
+        template<typename T>
+        struct OpaqueFuture {
+            using ResultType = T;
 
-        void *data;
-        bool (*poll_fn)(void **FSTD_MAYBE_NULL data, FSTD_TaskWaker waker, T *result);
-        void (*FSTD_MAYBE_NULL deinit_fn)(void **FSTD_MAYBE_NULL data);
+            void *data;
+            bool (*poll_fn)(void **FSTD_MAYBE_NULL data, FSTD_TaskWaker waker, T *result);
+            void (*FSTD_MAYBE_NULL deinit_fn)(void **FSTD_MAYBE_NULL data);
 
-        void deinit() noexcept {
-            if (this->deinit_fn)
-                this->deinit_fn(&this->data);
-        }
-        PollResult<T> poll(TaskWaker waker) noexcept {
-            T result;
-            bool completed = this->poll_fn(&this->data, waker, &result);
-            if (!completed)
-                return PollResult<T>{std::in_place_index<1>};
-            return PollResult<T>{std::in_place_index<0>, std::move(result)};
-        }
-    };
+            void deinit() noexcept {
+                if (this->deinit_fn)
+                    this->deinit_fn(&this->data);
+            }
+            PollResult<T> poll(Waker waker) noexcept {
+                if constexpr (std::is_same_v<T, void>) {
+                    bool completed = this->poll_fn(&this->data, waker, nullptr);
+                    if (!completed)
+                        return PollResult<T>{std::in_place_index<1>};
+                    return {};
+                }
+                else {
+                    T result;
+                    bool completed = this->poll_fn(&this->data, waker, &result);
+                    if (!completed)
+                        return PollResult<T>{std::in_place_index<1>};
+                    return PollResult<T>{std::in_place_index<0>, std::move(result)};
+                }
+            }
+        };
 
-    struct Tasks {
         template<Awaitable T>
-        static std::expected<OpaqueFuture<T>, Status> enqueueFuture(T fut) noexcept {
+        inline static std::expected<OpaqueFuture<T>, Status> enqueueFuture(T fut) noexcept {
             constexpr static usize fut_size = sizeof(T);
             constexpr static usize fut_align = alignof(T);
             constexpr static usize result_size = sizeof(typename T::ResultType);
             constexpr static usize result_align = alignof(typename T::ResultType);
             constexpr static FSTD_TaskWaiterPollFn poll_fn =
                     +[](void *FSTD_MAYBE_NULL ptr, FSTD_TaskWaker w, void *res) {
-                        T &fut = *static_cast<T *>(ptr);
-                        typename T::ResultType *result = static_cast<T::Result *>(res);
-                        TaskWaker waker = w;
-                        auto status = fut.poll(waker);
-                        if (status.index() != 0)
-                            return false;
-                        std::construct_at(result, std::get<0>(status));
-                        return true;
+                        if constexpr (!std::is_same_v<typename T::ResultType, void>) {
+                            T &fut = *static_cast<T *>(ptr);
+                            typename T::ResultType *result = static_cast<T::Result *>(res);
+                            Waker waker = w;
+                            auto status = fut.poll(waker);
+                            if (status.index() != 0)
+                                return false;
+                            std::construct_at(result, std::get<0>(status));
+                            return true;
+                        }
+                        else {
+                            T &fut = *static_cast<T *>(ptr);
+                            Waker waker = w;
+                            auto status = fut.poll(waker);
+                            if (status.index() != 0)
+                                return false;
+                            return true;
+                        }
                     };
             constexpr static FSTD_TaskDeinitFn deinit_fut = +[](void *FSTD_MAYBE_NULL ptr) {
                 T *fut = static_cast<T *>(ptr);
                 std::destroy_at(fut);
             };
             constexpr static FSTD_TaskDeinitFn deinit_result = +[](void *FSTD_MAYBE_NULL ptr) {
-                typename T::ResultType *result = static_cast<T::ResultType *>(ptr);
-                std::destroy_at(result);
+                if constexpr (!std::is_same_v<typename T::ResultType, void>) {
+                    typename T::ResultType *result = static_cast<T::ResultType *>(ptr);
+                    std::destroy_at(result);
+                }
             };
 
             alignas(T) unsigned char buffer[sizeof(T)];
@@ -4675,7 +5000,7 @@ namespace fstd {
             }
             return enqueued;
         }
-    };
+    } // namespace tasks
 
     // -----------------------------------------
     // tracing subsystem -----------------------
@@ -4766,66 +5091,34 @@ namespace fstd {
             void exit() const noexcept { fstd_tracing_exit_span(&this->id); }
         };
 
-        namespace impl {
-            inline void expectedNullTerminatedArray() {}
-
-            template<std::size_t N>
-            struct ConstString {
-                char str[N]{};
-
-                static constexpr std::size_t size = N - 1;
-
-                consteval ConstString() {}
-                consteval ConstString(const char (&new_str)[N]) {
-                    if (new_str[N - 1] != '\0')
-                        expectedNullTerminatedArray();
-                    std::copy_n(new_str, size, str);
-                }
-            };
-
-            template<typename... Args>
-            struct FormatString_ {
-                std::format_string<Args...> fmt;
-                std::source_location loc = std::source_location::current();
-
-                template<class T>
-                    requires std::constructible_from<std::format_string<Args...>, T const &>
-                consteval FormatString_(T const &fmt, std::source_location loc = std::source_location::current()) :
-                    fmt(fmt), loc(loc){};
-            };
-
-            template<typename... Args>
-            using FormatString = impl::FormatString_<std::type_identity_t<Args>...>;
-        } // namespace impl
-
         constexpr static const char DefaultScope[] = FSTD_TRACING_DEFAULT_SCOPE;
         constexpr static const char DefaultTarget[] = FSTD_TRACING_DEFAULT_TARGET;
-        template<impl::ConstString scope = DefaultScope, Level max_level = DefaultMaxLevel>
+        template<detail::ConstString scope = DefaultScope, Level max_level = DefaultMaxLevel>
         struct Scope {
-            template<impl::ConstString target = DefaultTarget, Level max_lvl = max_level>
+            template<detail::ConstString target = DefaultTarget, Level max_lvl = max_level>
             struct Target {
                 template<typename Unique = decltype([] {}), typename... Args>
-                static void logErr(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static void logErr(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                     logStatic<Unique, Level::Error, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static void logWarn(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static void logWarn(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                     logStatic<Unique, Level::Warn, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static void logInfo(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static void logInfo(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                     logStatic<Unique, Level::Info, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static void logDebug(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static void logDebug(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                     logStatic<Unique, Level::Debug, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static void logTrace(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static void logTrace(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                     logStatic<Unique, Level::Trace, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static void log(Level lvl, impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static void log(Level lvl, detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                     const auto formatter = [fmt, &args...](Slice<char> buffer) -> usize {
                         std::format_to_n_result result =
                                 std::format_to_n(buffer.ptr, buffer.len, fmt.fmt, std::forward<Args>(args)...);
@@ -4836,10 +5129,10 @@ namespace fstd {
                         const Fmt &fmt = *static_cast<const Fmt *>(data);
                         return fmt({buffer, buffer_len});
                     };
-                    logWithFormatter<Unique, Args...>(lvl, trampoline, &formatter, fmt.loc);
+                    logWithFormatter<Unique>(lvl, trampoline, &formatter, fmt.loc);
                 }
                 template<typename Unique = decltype([] {}), Level lvl, typename... Args>
-                static void logStatic(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static void logStatic(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                     const auto formatter = [fmt, &args...](Slice<char> buffer) -> usize {
                         std::format_to_n_result result =
                                 std::format_to_n(buffer.ptr, buffer.len, fmt.fmt, std::forward<Args>(args)...);
@@ -4850,7 +5143,7 @@ namespace fstd {
                         const Fmt &fmt = *static_cast<const Fmt *>(data);
                         return fmt({buffer, buffer_len});
                     };
-                    logWithFormatterStatic<Unique, lvl, Args...>(trampoline, &formatter, fmt.loc);
+                    logWithFormatterStatic<Unique, lvl>(trampoline, &formatter, fmt.loc);
                 }
                 template<typename Unique = decltype([] {})>
                 static void logWithFormatter(Level lvl, Formatter fmt, const void *data,
@@ -4874,7 +5167,7 @@ namespace fstd {
                     return spanStatic<Unique, Level::Error>();
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static auto spanErr(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static auto spanErr(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                     return spanStatic<Unique, Level::Error, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {})>
@@ -4882,7 +5175,7 @@ namespace fstd {
                     return spanStatic<Unique, Level::Warn>();
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static auto spanWarn(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static auto spanWarn(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                     return spanStatic<Unique, Level::Warn, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {})>
@@ -4890,7 +5183,7 @@ namespace fstd {
                     return spanStatic<Unique, Level::Info>();
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static auto spanInfo(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static auto spanInfo(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                     return spanStatic<Unique, Level::Info, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {})>
@@ -4898,7 +5191,7 @@ namespace fstd {
                     return spanStatic<Unique, Level::Debug>();
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static auto spanDebug(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static auto spanDebug(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                     return spanStatic<Unique, Level::Debug, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {})>
@@ -4906,7 +5199,7 @@ namespace fstd {
                     return spanStatic<Unique, Level::Trace>();
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static auto spanTrace(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static auto spanTrace(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                     return spanStatic<Unique, Level::Trace, Args...>(fmt, std::forward<Args>(args)...);
                 }
                 template<typename Unique = decltype([] {})>
@@ -4918,7 +5211,7 @@ namespace fstd {
                     return spanStatic<Unique, lvl>("");
                 }
                 template<typename Unique = decltype([] {}), typename... Args>
-                static std::optional<Span::Auto> span(Level lvl, impl::FormatString<Args...> fmt,
+                static std::optional<Span::Auto> span(Level lvl, detail::FormatString<Args...> fmt,
                                                       Args &&...args) noexcept {
                     const auto formatter = [fmt, &args...](Slice<char> buffer) -> usize {
                         std::format_to_n_result result =
@@ -4930,10 +5223,10 @@ namespace fstd {
                         const Fmt &fmt = *static_cast<const Fmt *>(data);
                         return fmt({buffer, buffer_len});
                     };
-                    return spanWithFormatter<Unique, Args...>(lvl, trampoline, &formatter, fmt.loc);
+                    return spanWithFormatter<Unique>(lvl, trampoline, &formatter, fmt.loc);
                 }
                 template<typename Unique = decltype([] {}), Level lvl, typename... Args>
-                static auto spanStatic(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+                static auto spanStatic(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                     const auto formatter = [fmt, &args...](Slice<char> buffer) -> usize {
                         std::format_to_n_result result =
                                 std::format_to_n(buffer.ptr, buffer.len, fmt.fmt, std::forward<Args>(args)...);
@@ -4944,7 +5237,7 @@ namespace fstd {
                         const Fmt &fmt = *static_cast<const Fmt *>(data);
                         return fmt({buffer, buffer_len});
                     };
-                    return spanWithFormatterStatic<Unique, lvl, Args...>(trampoline, &formatter, fmt.loc);
+                    return spanWithFormatterStatic<Unique, lvl>(trampoline, &formatter, fmt.loc);
                 }
                 template<typename Unique = decltype([] {})>
                 static std::optional<Span::Auto>
@@ -4972,27 +5265,27 @@ namespace fstd {
             using DefaultCtx = Target<>;
 
             template<typename Unique = decltype([] {}), typename... Args>
-            static void logErr(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static void logErr(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                 DefaultCtx::template logErr<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static void logWarn(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static void logWarn(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                 DefaultCtx::template logWarn<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static void logInfo(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static void logInfo(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                 DefaultCtx::template logInfo<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static void logDebug(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static void logDebug(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                 DefaultCtx::template logDebug<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static void logTrace(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static void logTrace(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                 DefaultCtx::template logTrace<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static void log(Level lvl, impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static void log(Level lvl, detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                 DefaultCtx::template log<Unique, Args...>(lvl, fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {})>
@@ -5005,7 +5298,7 @@ namespace fstd {
                 return DefaultCtx::template spanErr<Unique>();
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static auto spanErr(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static auto spanErr(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                 return DefaultCtx::template spanErr<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {})>
@@ -5013,7 +5306,7 @@ namespace fstd {
                 return DefaultCtx::template spanWarn<Unique>();
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static auto spanWarn(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static auto spanWarn(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                 return DefaultCtx::template spanWarn<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {})>
@@ -5021,7 +5314,7 @@ namespace fstd {
                 return DefaultCtx::template spanInfo<Unique>();
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static auto spanInfo(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static auto spanInfo(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                 return DefaultCtx::template spanInfo<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {})>
@@ -5029,7 +5322,7 @@ namespace fstd {
                 return DefaultCtx::template spanDebug<Unique>();
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static auto spanDebug(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static auto spanDebug(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                 return DefaultCtx::template spanDebug<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {})>
@@ -5037,7 +5330,7 @@ namespace fstd {
                 return DefaultCtx::template spanTrace<Unique>();
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static auto spanTrace(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static auto spanTrace(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
                 return DefaultCtx::template spanTrace<Unique, Args...>(fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {})>
@@ -5045,7 +5338,8 @@ namespace fstd {
                 return DefaultCtx::template span<Unique>(lvl);
             }
             template<typename Unique = decltype([] {}), typename... Args>
-            static std::optional<Span::Auto> span(Level lvl, impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+            static std::optional<Span::Auto> span(Level lvl, detail::FormatString<Args...> fmt,
+                                                  Args &&...args) noexcept {
                 return DefaultCtx::template span<Unique, Args...>(lvl, fmt, std::forward<Args>(args)...);
             }
             template<typename Unique = decltype([] {})>
@@ -5059,27 +5353,27 @@ namespace fstd {
         using DefaultCtx = DefaultScopeCtx::DefaultCtx;
 
         template<typename Unique = decltype([] {}), typename... Args>
-        static void logErr(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static void logErr(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
             DefaultScopeCtx::template logErr<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static void logWarn(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static void logWarn(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
             DefaultScopeCtx::template logWarn<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static void logInfo(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static void logInfo(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
             DefaultScopeCtx::template logInfo<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static void logDebug(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static void logDebug(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
             DefaultScopeCtx::template logDebug<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static void logTrace(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static void logTrace(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
             DefaultScopeCtx::template logTrace<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static void log(Level lvl, impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static void log(Level lvl, detail::FormatString<Args...> fmt, Args &&...args) noexcept {
             DefaultScopeCtx::template log<Unique, Args...>(lvl, fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {})>
@@ -5092,7 +5386,7 @@ namespace fstd {
             return DefaultScopeCtx::template spanErr<Unique>();
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static auto spanErr(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static auto spanErr(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
             return DefaultScopeCtx::template spanErr<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {})>
@@ -5100,7 +5394,7 @@ namespace fstd {
             return DefaultScopeCtx::template spanWarn<Unique>();
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static auto spanWarn(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static auto spanWarn(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
             return DefaultScopeCtx::template spanWarn<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {})>
@@ -5108,7 +5402,7 @@ namespace fstd {
             return DefaultScopeCtx::template spanInfo<Unique>();
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static auto spanInfo(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static auto spanInfo(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
             return DefaultScopeCtx::template spanInfo<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {})>
@@ -5116,7 +5410,7 @@ namespace fstd {
             return DefaultScopeCtx::template spanDebug<Unique>();
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static auto spanDebug(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static auto spanDebug(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
             return DefaultScopeCtx::template spanDebug<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {})>
@@ -5124,7 +5418,7 @@ namespace fstd {
             return DefaultScopeCtx::template spanTrace<Unique>();
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static auto spanTrace(impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static auto spanTrace(detail::FormatString<Args...> fmt, Args &&...args) noexcept {
             return DefaultScopeCtx::template spanTrace<Unique, Args...>(fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {})>
@@ -5132,7 +5426,7 @@ namespace fstd {
             return DefaultScopeCtx::template span<Unique>(lvl);
         }
         template<typename Unique = decltype([] {}), typename... Args>
-        static std::optional<Span::Auto> span(Level lvl, impl::FormatString<Args...> fmt, Args &&...args) noexcept {
+        static std::optional<Span::Auto> span(Level lvl, detail::FormatString<Args...> fmt, Args &&...args) noexcept {
             return DefaultScopeCtx::template span<Unique, Args...>(lvl, fmt, std::forward<Args>(args)...);
         }
         template<typename Unique = decltype([] {})>
@@ -5364,7 +5658,7 @@ namespace fstd {
             using FStd = FSTD_TracingCfg;
             constexpr Cfg() noexcept : Cfg(0, DefaultMaxLevel, {}, true, "") {}
             constexpr Cfg(usize format_buffer_len, Level max_level, Slice<const Subscriber> subscribers,
-                          bool register_thread, Slice<const char> app_name) noexcept :
+                          bool register_thread, StrConst app_name) noexcept :
                 FStd{
                         .id = {.id = static_cast<FSTD_CfgId>(CfgId::Tracing)},
                         .format_buffer_len = format_buffer_len,
@@ -5389,522 +5683,1212 @@ namespace fstd {
     // modules subsystem -----------------------
     // -----------------------------------------
 
-    // NOLINTNEXTLINE(performance-enum-size)
-    enum class ModuleParamTag : FSTD_ModuleParamTag {
-        U8 = FSTD_ModuleParamTag_U8,
-        U16 = FSTD_ModuleParamTag_U16,
-        U32 = FSTD_ModuleParamTag_U32,
-        U64 = FSTD_ModuleParamTag_U64,
-        I8 = FSTD_ModuleParamTag_I8,
-        I16 = FSTD_ModuleParamTag_I16,
-        I32 = FSTD_ModuleParamTag_I32,
-        I64 = FSTD_ModuleParamTag_I64,
-    };
-
-    // NOLINTNEXTLINE(performance-enum-size)
-    enum class ModuleAccessGroup : FSTD_ModuleAccessGroup {
-        Public = FSTD_ModuleAccessGroup_Public,
-        Dependency = FSTD_ModuleAccessGroup_Dependency,
-        Private = FSTD_ModuleAccessGroup_Private,
-    };
-
-    struct ModuleParamInfo : FSTD_ModuleParamInfo {
-        using Type = ModuleParamInfo;
-        using FStd = FSTD_ModuleParamInfo;
-        constexpr ModuleParamInfo() noexcept = default;
-        constexpr ModuleParamInfo(const FStd &other) noexcept : FStd(other) {};
-        constexpr ModuleParamInfo(const ModuleParamInfo &other) noexcept = default;
-        constexpr ModuleParamInfo(ModuleParamInfo &&other) noexcept = default;
-        constexpr ModuleParamInfo &operator=(const ModuleParamInfo &other) noexcept = default;
-        constexpr ModuleParamInfo &operator=(ModuleParamInfo &&other) noexcept = default;
-    };
-
-    template<typename T>
-    struct ModuleParamUtil;
-
-    template<>
-    struct ModuleParamUtil<u8> {
-        using Param = FSTD_ModuleParamU8;
-        static constexpr ModuleParamTag ParamTag = ModuleParamTag::U8;
-        static constexpr auto read = fstd_module_param_u8_read;
-        static constexpr auto write = fstd_module_param_u8_write;
-        static constexpr auto readData = fstd_module_param_data_read_u8;
-        static constexpr auto writeData = fstd_module_param_data_write_u8;
-    };
-    template<>
-    struct ModuleParamUtil<u16> {
-        using Param = FSTD_ModuleParamU16;
-        static constexpr ModuleParamTag ParamTag = ModuleParamTag::U16;
-        static constexpr auto read = fstd_module_param_u16_read;
-        static constexpr auto write = fstd_module_param_u16_write;
-        static constexpr auto readData = fstd_module_param_data_read_u16;
-        static constexpr auto writeData = fstd_module_param_data_write_u16;
-    };
-    template<>
-    struct ModuleParamUtil<u32> {
-        using Param = FSTD_ModuleParamU32;
-        static constexpr ModuleParamTag ParamTag = ModuleParamTag::U32;
-        static constexpr auto read = fstd_module_param_u32_read;
-        static constexpr auto write = fstd_module_param_u32_write;
-        static constexpr auto readData = fstd_module_param_data_read_u32;
-        static constexpr auto writeData = fstd_module_param_data_write_u32;
-    };
-    template<>
-    struct ModuleParamUtil<u64> {
-        using Param = FSTD_ModuleParamU64;
-        static constexpr ModuleParamTag ParamTag = ModuleParamTag::U64;
-        static constexpr auto read = fstd_module_param_u64_read;
-        static constexpr auto write = fstd_module_param_u64_write;
-        static constexpr auto readData = fstd_module_param_data_read_u64;
-        static constexpr auto writeData = fstd_module_param_data_write_u64;
-    };
-    template<>
-    struct ModuleParamUtil<i8> {
-        using Param = FSTD_ModuleParamI8;
-        static constexpr ModuleParamTag ParamTag = ModuleParamTag::I8;
-        static constexpr auto read = fstd_module_param_i8_read;
-        static constexpr auto write = fstd_module_param_i8_write;
-        static constexpr auto readData = fstd_module_param_data_read_i8;
-        static constexpr auto writeData = fstd_module_param_data_write_i8;
-    };
-    template<>
-    struct ModuleParamUtil<i16> {
-        using Param = FSTD_ModuleParamI16;
-        static constexpr ModuleParamTag ParamTag = ModuleParamTag::I16;
-        static constexpr auto read = fstd_module_param_i16_read;
-        static constexpr auto write = fstd_module_param_i16_write;
-        static constexpr auto readData = fstd_module_param_data_read_i16;
-        static constexpr auto writeData = fstd_module_param_data_write_i16;
-    };
-    template<>
-    struct ModuleParamUtil<i32> {
-        using Param = FSTD_ModuleParamI32;
-        static constexpr ModuleParamTag ParamTag = ModuleParamTag::I32;
-        static constexpr auto read = fstd_module_param_i32_read;
-        static constexpr auto write = fstd_module_param_i32_write;
-        static constexpr auto readData = fstd_module_param_data_read_i32;
-        static constexpr auto writeData = fstd_module_param_data_write_i32;
-    };
-    template<>
-    struct ModuleParamUtil<i64> {
-        using Param = FSTD_ModuleParamI64;
-        static constexpr ModuleParamTag ParamTag = ModuleParamTag::I64;
-        static constexpr auto read = fstd_module_param_i64_read;
-        static constexpr auto write = fstd_module_param_i64_write;
-        static constexpr auto readData = fstd_module_param_data_read_i64;
-        static constexpr auto writeData = fstd_module_param_data_write_i64;
-    };
-
-    template<typename T>
-    struct ModuleParam {
-        using Type = ModuleParam;
-        using FStd = typename ModuleParamUtil<T>::Param *;
-        constexpr ModuleParam() noexcept = default;
-        constexpr ModuleParam(const FStd &other) noexcept : handle(other) {};
-        constexpr ModuleParam(const ModuleParam &other) noexcept = default;
-        constexpr ModuleParam(ModuleParam &&other) noexcept = default;
-        constexpr ModuleParam &operator=(const ModuleParam &other) noexcept = default;
-        constexpr ModuleParam &operator=(ModuleParam &&other) noexcept = default;
-        constexpr operator typename ModuleParamUtil<T>::Param *() const noexcept { return this->handle; };
-
-        typename ModuleParamUtil<T>::Param *handle;
-
-        ModuleParamTag tag() const noexcept { return ModuleParamUtil<T>::ParamTag; }
-        T read() const noexcept { return ModuleParam<T>::read(this->handle); }
-        void write(T value) const noexcept { return ModuleParam<T>::write(this->handle, value); }
-    };
-
-    template<>
-    struct ModuleParam<void> {
-        using Type = ModuleParam;
-        using FStd = FSTD_ModuleParam *;
-        constexpr ModuleParam() noexcept = default;
-        constexpr ModuleParam(const FStd &other) noexcept : handle(other) {};
-        constexpr ModuleParam(const ModuleParam &other) noexcept = default;
-        constexpr ModuleParam(ModuleParam &&other) noexcept = default;
-        constexpr ModuleParam &operator=(const ModuleParam &other) noexcept = default;
-        constexpr ModuleParam &operator=(ModuleParam &&other) noexcept = default;
-        constexpr operator FSTD_ModuleParam *() const noexcept { return this->handle; };
-
-        FSTD_ModuleParam *handle;
-
-        ModuleParamTag tag() const noexcept {
-            return static_cast<ModuleParamTag>(fstd_module_param_opaque_tag(this->handle));
-        }
-        template<typename T>
-        T read() const noexcept {
-            fstd_dbg_assert(this->tag() == ModuleParamUtil<T>::ParamTag);
-            ModuleParam<T> param = reinterpret_cast<typename ModuleParamUtil<T>::Param *>(this->handle);
-            return param.read();
-        }
-        template<typename T>
-        void write(T value) const noexcept {
-            fstd_dbg_assert(this->tag() == ModuleParamUtil<T>::ParamTag);
-            ModuleParam<T> param = reinterpret_cast<typename ModuleParamUtil<T>::Param *>(this->handle);
-            param.write(value);
-        }
-    };
-
-    template<typename T>
-    struct ModuleParamData : FSTD_ModuleParamData {
-        using Type = ModuleParamData;
-        using FStd = FSTD_ModuleParamData;
-        constexpr ModuleParamData() noexcept = default;
-        constexpr ModuleParamData(const FStd &other) noexcept : FStd(other) {};
-        constexpr ModuleParamData(const ModuleParamData &other) noexcept = default;
-        constexpr ModuleParamData(ModuleParamData &&other) noexcept = default;
-        constexpr ModuleParamData &operator=(const ModuleParamData &other) noexcept = default;
-        constexpr ModuleParamData &operator=(ModuleParamData &&other) noexcept = default;
-
-        ModuleParamTag tag() const noexcept { return ModuleParamUtil<T>::ParamTag; }
-        T read() const noexcept { return ModuleParam<T>::readData(*this); }
-        void write(T value) const noexcept { return ModuleParam<T>::writeData(*this, value); }
-    };
-
-    template<>
-    struct ModuleParamData<void> : FSTD_ModuleParamData {
-        using Type = ModuleParamData;
-        using FStd = FSTD_ModuleParamData;
-        constexpr ModuleParamData() noexcept = default;
-        constexpr ModuleParamData(const FStd &other) noexcept : FStd(other) {};
-        constexpr ModuleParamData(const ModuleParamData &other) noexcept = default;
-        constexpr ModuleParamData(ModuleParamData &&other) noexcept = default;
-        constexpr ModuleParamData &operator=(const ModuleParamData &other) noexcept = default;
-        constexpr ModuleParamData &operator=(ModuleParamData &&other) noexcept = default;
-
-        ModuleParamTag tag() const noexcept { return static_cast<ModuleParamTag>(fstd_module_param_data_tag(*this)); }
-        template<typename T>
-        T read() const noexcept {
-            fstd_dbg_assert(this->tag() == ModuleParamUtil<T>::ParamTag);
-            ModuleParamData<T> param = *this;
-            return param.read();
-        }
-        template<typename T>
-        void write(T value) const noexcept {
-            fstd_dbg_assert(this->tag() == ModuleParamUtil<T>::ParamTag);
-            ModuleParamData<T> param = *this;
-            param.write(value);
-        }
-    };
-
-    template<typename T>
-    struct ModuleSymbol : FSTD_ModuleSymbol {
-        using Type = ModuleSymbol;
-        using FStd = FSTD_ModuleSymbol;
-        constexpr ModuleSymbol() noexcept = default;
-        constexpr ModuleSymbol(Slice<const char> name, Version version) noexcept : ModuleSymbol(name, "", version) {};
-        constexpr ModuleSymbol(Slice<const char> name, Slice<const char> ns, Version version) noexcept :
-            FStd{.name = name, .ns = ns, .version = version} {};
-        constexpr ModuleSymbol(const FStd &other) noexcept : FStd(other) {};
-        constexpr ModuleSymbol(const ModuleSymbol &other) noexcept = default;
-        constexpr ModuleSymbol(ModuleSymbol &&other) noexcept = default;
-        constexpr ModuleSymbol &operator=(const ModuleSymbol &other) noexcept = default;
-        constexpr ModuleSymbol &operator=(ModuleSymbol &&other) noexcept = default;
-    };
-
-    struct ModuleHandle {
-        using Type = ModuleHandle;
-        using FStd = FSTD_ModuleHandle *;
-        constexpr ModuleHandle() noexcept = default;
-        constexpr ModuleHandle(const FStd &other) noexcept : handle(other) {};
-        constexpr ModuleHandle(const ModuleHandle &other) noexcept = default;
-        constexpr ModuleHandle(ModuleHandle &&other) noexcept = default;
-        constexpr ModuleHandle &operator=(const ModuleHandle &other) noexcept = default;
-        constexpr ModuleHandle &operator=(ModuleHandle &&other) noexcept = default;
-        constexpr operator FSTD_ModuleHandle *() const noexcept { return this->handle; };
-
-        FSTD_ModuleHandle *handle;
-
-        Slice<const char> name() const noexcept {
-            auto value = fstd_module_handle_name(this->handle);
-            return {value.ptr, value.len};
-        }
-        Slice<const char> description() const noexcept {
-            auto value = fstd_module_handle_description(this->handle);
-            return {value.ptr, value.len};
-        }
-        Slice<const char> license() const noexcept {
-            auto value = fstd_module_handle_license(this->handle);
-            return {value.ptr, value.len};
-        }
-        Path modulePath() const noexcept { return fstd_module_handle_module_path(this->handle); }
-        void ref() const noexcept { return fstd_module_handle_ref(this->handle); }
-        void unref() const noexcept { return fstd_module_handle_unref(this->handle); }
-        void markUnloadable() const noexcept { return fstd_module_handle_mark_unloadable(this->handle); }
-        bool isLoaded() const noexcept { return fstd_module_handle_is_loaded(this->handle); }
-        bool tryRefInstanceStrong() const noexcept { return fstd_module_handle_try_ref_instance_strong(this->handle); }
-        void unrefInstanceStrong() const noexcept { return fstd_module_handle_unref_instance_strong(this->handle); }
-        static std::expected<ModuleHandle, Status> findByName(Slice<const char> module) noexcept {
-            ModuleHandle handle{};
-            Status status = static_cast<Status>(fstd_module_handle_find_by_name(&handle.handle, module));
-            if (status != Status::Ok)
-                return std::unexpected(status);
-            return handle;
-        }
-        template<typename T>
-        static std::expected<ModuleHandle, Status> findBySymbol(ModuleSymbol<T> symbol) noexcept {
-            ModuleHandle handle{};
-            Status status = static_cast<Status>(fstd_module_handle_find_by_symbol(&handle.handle, symbol));
-            if (status != Status::Ok)
-                return std::unexpected(status);
-            return handle;
-        }
-    };
-
-    // NOLINTNEXTLINE(performance-enum-size)
-    enum class ModuleDependency : FSTD_ModuleDependency {
-        None = FSTD_ModuleDependency_None,
-        Static = FSTD_ModuleDependency_Static,
-        Dynamic = FSTD_ModuleDependency_Dynamic,
-    };
-
-    struct ModuleInstance {
-        using Type = ModuleInstance;
-        using FStd = FSTD_ModuleInstance *;
-        constexpr ModuleInstance() noexcept = default;
-        constexpr ModuleInstance(const FStd &other) noexcept : handle(other) {};
-        constexpr ModuleInstance(const ModuleInstance &other) noexcept = default;
-        constexpr ModuleInstance(ModuleInstance &&other) noexcept = default;
-        constexpr ModuleInstance &operator=(const ModuleInstance &other) noexcept = default;
-        constexpr ModuleInstance &operator=(ModuleInstance &&other) noexcept = default;
-        constexpr operator FSTD_ModuleInstance *() const noexcept { return this->handle; };
-
-        FSTD_ModuleInstance *handle;
-
-        ModuleParam<void> *const *FSTD_MAYBE_NULL parameters() const noexcept {
-            return reinterpret_cast<ModuleParam<void> *const *>(fstd_module_instance_parameters(this->handle));
-        }
-        Path const *FSTD_MAYBE_NULL resources() const noexcept {
-            return reinterpret_cast<Path const *>(fstd_module_instance_resources(this->handle));
-        }
-        const void *const *FSTD_MAYBE_NULL imports() const noexcept {
-            return fstd_module_instance_imports(this->handle);
-        }
-        const void *const *FSTD_MAYBE_NULL exports() const noexcept {
-            return fstd_module_instance_exports(this->handle);
-        }
-        ModuleHandle moduleHandle() const noexcept { return fstd_module_instance_handle(this->handle); }
-        Ctx ctxHandle() const noexcept { return fstd_module_instance_ctx_handle(this->handle); }
-        void const *FSTD_MAYBE_NULL state() const noexcept { return fstd_module_instance_state(this->handle); }
-
-        void ref() const noexcept { return fstd_module_instance_ref(this->handle); }
-        void unref() const noexcept { return fstd_module_instance_unref(this->handle); }
-        ModuleDependency queryNs(Slice<const char> ns) const noexcept {
-            return static_cast<ModuleDependency>(fstd_module_instance_query_namespace(this->handle, ns));
-        }
-        Status addNs(Slice<const char> ns) const noexcept {
-            return static_cast<Status>(fstd_module_instance_add_namespace(this->handle, ns));
-        }
-        Status removeNs(Slice<const char> ns) const noexcept {
-            return static_cast<Status>(fstd_module_instance_remove_namespace(this->handle, ns));
-        }
-        ModuleDependency queryDep(ModuleHandle handle) const noexcept {
-            return static_cast<ModuleDependency>(fstd_module_instance_query_dependency(this->handle, handle.handle));
-        }
-        Status addDep(ModuleHandle handle) const noexcept {
-            return static_cast<Status>(fstd_module_instance_add_dependency(this->handle, handle.handle));
-        }
-        Status removeDep(ModuleHandle handle) const noexcept {
-            return static_cast<Status>(fstd_module_instance_remove_dependency(this->handle, handle.handle));
-        }
-        template<typename T>
-        std::expected<T const *, Status> loadSymbol(ModuleSymbol<T> symbol) const noexcept {
-            void const *loaded;
-            Status status = static_cast<Status>(fstd_module_instance_load_symbol(this->handle, symbol, &loaded));
-            if (status != Status::Ok)
-                return std::unexpected(status);
-            return static_cast<T const *>(loaded);
-        }
-        template<typename T>
-        std::expected<T, Status> readParameter(Slice<const char> module, Slice<const char> parameter) const noexcept {
-            T value;
-            ModuleParamTag tag = ModuleParamUtil<T>::ParamTag;
-            Status status = static_cast<Status>(
-                    fstd_module_instance_read_parameter_opaque(this->handle, tag, module, parameter, &value));
-            if (status != Status::Ok)
-                return std::unexpected(status);
-            return value;
-        }
-        template<typename T>
-        Status writeParameter(Slice<const char> module, Slice<const char> parameter, const T value) const noexcept {
-            ModuleParamTag tag = ModuleParamUtil<T>::ParamTag;
-            Status status = static_cast<Status>(
-                    fstd_module_instance_write_parameter_opaque(this->handle, tag, module, parameter, &value));
-            return status;
-        }
-    };
-
-    struct ModuleRootInstance {
-        using Type = ModuleRootInstance;
-        using FStd = FSTD_ModuleRootInstance *;
-        constexpr ModuleRootInstance() noexcept = default;
-        constexpr ModuleRootInstance(const FStd &other) noexcept : handle(other) {};
-        constexpr ModuleRootInstance(const ModuleRootInstance &other) noexcept = default;
-        constexpr ModuleRootInstance(ModuleRootInstance &&other) noexcept = default;
-        constexpr ModuleRootInstance &operator=(const ModuleRootInstance &other) noexcept = default;
-        constexpr ModuleRootInstance &operator=(ModuleRootInstance &&other) noexcept = default;
-        constexpr operator FSTD_ModuleRootInstance *() const noexcept { return this->handle; };
-
-        FSTD_ModuleRootInstance *handle;
-
-        static std::expected<ModuleRootInstance, Status> init() noexcept {
-            ModuleRootInstance inst{};
-            Status status = static_cast<Status>(fstd_module_root_instance_init(&inst.handle));
-            if (status != Status::Ok)
-                return std::unexpected(status);
-            return inst;
-        }
-        void deinit() const noexcept { return fstd_module_root_instance_deinit(this->handle); }
-        ModuleDependency queryNs(Slice<const char> ns) const noexcept {
-            return static_cast<ModuleDependency>(fstd_module_root_instance_query_namespace(this->handle, ns));
-        }
-        Status addNs(Slice<const char> ns) const noexcept {
-            return static_cast<Status>(fstd_module_root_instance_add_namespace(this->handle, ns));
-        }
-        Status removeNs(Slice<const char> ns) const noexcept {
-            return static_cast<Status>(fstd_module_root_instance_remove_namespace(this->handle, ns));
-        }
-        ModuleDependency queryDep(ModuleHandle handle) const noexcept {
-            return static_cast<ModuleDependency>(
-                    fstd_module_root_instance_query_dependency(this->handle, handle.handle));
-        }
-        Status addDep(ModuleHandle handle) const noexcept {
-            return static_cast<Status>(fstd_module_root_instance_add_dependency(this->handle, handle.handle));
-        }
-        Status removeDep(ModuleHandle handle) const noexcept {
-            return static_cast<Status>(fstd_module_root_instance_remove_dependency(this->handle, handle.handle));
-        }
-        template<typename T>
-        std::expected<T const *, Status> loadSymbol(ModuleSymbol<T> symbol) const noexcept {
-            void const *loaded;
-            Status status = static_cast<Status>(fstd_module_root_instance_load_symbol(this->handle, symbol, &loaded));
-            if (status != Status::Ok)
-                return std::unexpected(status);
-            return static_cast<T const *>(loaded);
-        }
-        template<typename T>
-        std::expected<T, Status> readParameter(Slice<const char> module, Slice<const char> parameter) const noexcept {
-            T value;
-            ModuleParamTag tag = ModuleParamUtil<T>::ParamTag;
-            Status status = static_cast<Status>(
-                    fstd_module_root_instance_read_parameter_opaque(this->handle, tag, module, parameter, &value));
-            if (status != Status::Ok)
-                return std::unexpected(status);
-            return value;
-        }
-        template<typename T>
-        Status writeParameter(Slice<const char> module, Slice<const char> parameter, const T value) const noexcept {
-            ModuleParamTag tag = ModuleParamUtil<T>::ParamTag;
-            Status status = static_cast<Status>(
-                    fstd_module_root_instance_write_parameter_opaque(this->handle, tag, module, parameter, &value));
-            return status;
-        }
-    };
-
-    struct ModuleExport : FSTD_ModuleExport {
-        using Type = ModuleExport;
-        using FStd = FSTD_ModuleExport;
-        constexpr ModuleExport() noexcept = default;
-        constexpr ModuleExport(const FStd &other) noexcept : FStd(other) {};
-        constexpr ModuleExport(const ModuleExport &other) noexcept = default;
-        constexpr ModuleExport(ModuleExport &&other) noexcept = default;
-        constexpr ModuleExport &operator=(const ModuleExport &other) noexcept = default;
-        constexpr ModuleExport &operator=(ModuleExport &&other) noexcept = default;
-    };
-
-    struct ModuleLoader {
-        using Type = ModuleLoader;
-        using FStd = FSTD_ModuleLoader *;
-        constexpr ModuleLoader() noexcept = default;
-        constexpr ModuleLoader(const FStd &other) noexcept : handle(other) {};
-        constexpr ModuleLoader(const ModuleLoader &other) noexcept = default;
-        constexpr ModuleLoader(ModuleLoader &&other) noexcept = default;
-        constexpr ModuleLoader &operator=(const ModuleLoader &other) noexcept = default;
-        constexpr ModuleLoader &operator=(ModuleLoader &&other) noexcept = default;
-        constexpr operator FSTD_ModuleLoader *() const noexcept { return this->handle; };
-
-        struct ResolvedModule {
-            std::optional<ModuleHandle> handle;
-            const ModuleExport &module;
+    namespace modules {
+        // NOLINTNEXTLINE(performance-enum-size)
+        enum class ParamTag : FSTD_ModuleParamTag {
+            U8 = FSTD_ModuleParamTag_U8,
+            U16 = FSTD_ModuleParamTag_U16,
+            U32 = FSTD_ModuleParamTag_U32,
+            U64 = FSTD_ModuleParamTag_U64,
+            I8 = FSTD_ModuleParamTag_I8,
+            I16 = FSTD_ModuleParamTag_I16,
+            I32 = FSTD_ModuleParamTag_I32,
+            I64 = FSTD_ModuleParamTag_I64,
         };
 
         // NOLINTNEXTLINE(performance-enum-size)
-        enum class FilterRequest : FSTD_ModuleLoaderFilterRequest {
-            Skip = FSTD_ModuleLoaderFilterRequest_Skip,
-            Load = FSTD_ModuleLoaderFilterRequest_Load,
+        enum class AccessGroup : FSTD_ModuleAccessGroup {
+            Public = FSTD_ModuleAccessGroup_Public,
+            Dependency = FSTD_ModuleAccessGroup_Dependency,
+            Private = FSTD_ModuleAccessGroup_Private,
         };
 
-        FSTD_ModuleLoader *handle;
+        struct ParamInfo : FSTD_ModuleParamInfo {
+            using Type = ParamInfo;
+            using FStd = FSTD_ModuleParamInfo;
+            constexpr ParamInfo() noexcept = default;
+            constexpr ParamInfo(const FStd &other) noexcept : FStd(other) {};
+            constexpr ParamInfo(const ParamInfo &other) noexcept = default;
+            constexpr ParamInfo(ParamInfo &&other) noexcept = default;
+            constexpr ParamInfo &operator=(const ParamInfo &other) noexcept = default;
+            constexpr ParamInfo &operator=(ParamInfo &&other) noexcept = default;
+        };
 
-        static std::expected<ModuleLoader, Status> init() noexcept {
-            ModuleLoader loader;
-            Status status = static_cast<Status>(fstd_module_loader_init(&loader.handle));
-            if (status != Status::Ok)
-                return std::unexpected(status);
-            return loader;
-        }
-        void deinit() const noexcept { return fstd_module_loader_deinit(this->handle); }
-        bool containsModule(Slice<const char> module) const noexcept {
-            return fstd_module_loader_contains_module(this->handle, module);
-        }
         template<typename T>
-        bool containsSymbol(ModuleSymbol<T> symbol) const noexcept {
-            return fstd_module_loader_contains_symbol(this->handle, symbol);
+        struct ParamUtil;
+
+        template<>
+        struct ParamUtil<u8> {
+            using BaseType = u8;
+            using Param = FSTD_ModuleParamU8;
+            static constexpr ParamTag ParamTag = ParamTag::U8;
+            static constexpr auto read = fstd_module_param_u8_read;
+            static constexpr auto write = fstd_module_param_u8_write;
+            static constexpr auto readData = fstd_module_param_data_read_u8;
+            static constexpr auto writeData = fstd_module_param_data_write_u8;
+        };
+        template<>
+        struct ParamUtil<u16> {
+            using BaseType = u16;
+            using Param = FSTD_ModuleParamU16;
+            static constexpr ParamTag ParamTag = ParamTag::U16;
+            static constexpr auto read = fstd_module_param_u16_read;
+            static constexpr auto write = fstd_module_param_u16_write;
+            static constexpr auto readData = fstd_module_param_data_read_u16;
+            static constexpr auto writeData = fstd_module_param_data_write_u16;
+        };
+        template<>
+        struct ParamUtil<u32> {
+            using BaseType = u32;
+            using Param = FSTD_ModuleParamU32;
+            static constexpr ParamTag ParamTag = ParamTag::U32;
+            static constexpr auto read = fstd_module_param_u32_read;
+            static constexpr auto write = fstd_module_param_u32_write;
+            static constexpr auto readData = fstd_module_param_data_read_u32;
+            static constexpr auto writeData = fstd_module_param_data_write_u32;
+        };
+        template<>
+        struct ParamUtil<u64> {
+            using BaseType = u64;
+            using Param = FSTD_ModuleParamU64;
+            static constexpr ParamTag ParamTag = ParamTag::U64;
+            static constexpr auto read = fstd_module_param_u64_read;
+            static constexpr auto write = fstd_module_param_u64_write;
+            static constexpr auto readData = fstd_module_param_data_read_u64;
+            static constexpr auto writeData = fstd_module_param_data_write_u64;
+        };
+        template<>
+        struct ParamUtil<i8> {
+            using BaseType = i8;
+            using Param = FSTD_ModuleParamI8;
+            static constexpr ParamTag ParamTag = ParamTag::I8;
+            static constexpr auto read = fstd_module_param_i8_read;
+            static constexpr auto write = fstd_module_param_i8_write;
+            static constexpr auto readData = fstd_module_param_data_read_i8;
+            static constexpr auto writeData = fstd_module_param_data_write_i8;
+        };
+        template<>
+        struct ParamUtil<i16> {
+            using BaseType = i16;
+            using Param = FSTD_ModuleParamI16;
+            static constexpr ParamTag ParamTag = ParamTag::I16;
+            static constexpr auto read = fstd_module_param_i16_read;
+            static constexpr auto write = fstd_module_param_i16_write;
+            static constexpr auto readData = fstd_module_param_data_read_i16;
+            static constexpr auto writeData = fstd_module_param_data_write_i16;
+        };
+        template<>
+        struct ParamUtil<i32> {
+            using BaseType = i32;
+            using Param = FSTD_ModuleParamI32;
+            static constexpr ParamTag ParamTag = ParamTag::I32;
+            static constexpr auto read = fstd_module_param_i32_read;
+            static constexpr auto write = fstd_module_param_i32_write;
+            static constexpr auto readData = fstd_module_param_data_read_i32;
+            static constexpr auto writeData = fstd_module_param_data_write_i32;
+        };
+        template<>
+        struct ParamUtil<i64> {
+            using BaseType = i64;
+            using Param = FSTD_ModuleParamI64;
+            static constexpr ParamTag ParamTag = ParamTag::I64;
+            static constexpr auto read = fstd_module_param_i64_read;
+            static constexpr auto write = fstd_module_param_i64_write;
+            static constexpr auto readData = fstd_module_param_data_read_i64;
+            static constexpr auto writeData = fstd_module_param_data_write_i64;
+        };
+
+        template<typename T>
+        struct Param {
+            using Type = Param;
+            using FStd = typename ParamUtil<T>::Param *;
+            constexpr Param() noexcept = default;
+            constexpr Param(const FStd &other) noexcept : handle(other) {};
+            constexpr Param(const Param &other) noexcept = default;
+            constexpr Param(Param &&other) noexcept = default;
+            constexpr Param &operator=(const Param &other) noexcept = default;
+            constexpr Param &operator=(Param &&other) noexcept = default;
+            constexpr operator typename ParamUtil<T>::Param *() const noexcept { return this->handle; };
+
+            typename ParamUtil<T>::Param *handle;
+
+            ParamTag tag() const noexcept { return ParamUtil<T>::ParamTag; }
+            T read() const noexcept { return Param<T>::read(this->handle); }
+            void write(T value) const noexcept { return Param<T>::write(this->handle, value); }
+        };
+
+        template<>
+        struct Param<void> {
+            using Type = Param;
+            using FStd = FSTD_ModuleParam *;
+            constexpr Param() noexcept = default;
+            constexpr Param(const FStd &other) noexcept : handle(other) {};
+            constexpr Param(const Param &other) noexcept = default;
+            constexpr Param(Param &&other) noexcept = default;
+            constexpr Param &operator=(const Param &other) noexcept = default;
+            constexpr Param &operator=(Param &&other) noexcept = default;
+            constexpr operator FSTD_ModuleParam *() const noexcept { return this->handle; };
+
+            FSTD_ModuleParam *handle;
+
+            ParamTag tag() const noexcept { return static_cast<ParamTag>(fstd_module_param_opaque_tag(this->handle)); }
+            template<typename T>
+            T read() const noexcept {
+                fstd_dbg_assert(this->tag() == ParamUtil<T>::ParamTag);
+                Param<T> param = reinterpret_cast<typename ParamUtil<T>::Param *>(this->handle);
+                return param.read();
+            }
+            template<typename T>
+            void write(T value) const noexcept {
+                fstd_dbg_assert(this->tag() == ParamUtil<T>::ParamTag);
+                Param<T> param = reinterpret_cast<typename ParamUtil<T>::Param *>(this->handle);
+                param.write(value);
+            }
+        };
+
+        template<typename T>
+        struct ParamData : FSTD_ModuleParamData {
+            using Type = ParamData;
+            using FStd = FSTD_ModuleParamData;
+            constexpr ParamData() noexcept = default;
+            constexpr ParamData(const FStd &other) noexcept : FStd(other) {};
+            constexpr ParamData(const ParamData &other) noexcept = default;
+            constexpr ParamData(ParamData &&other) noexcept = default;
+            constexpr ParamData &operator=(const ParamData &other) noexcept = default;
+            constexpr ParamData &operator=(ParamData &&other) noexcept = default;
+
+            ParamTag tag() const noexcept { return ParamUtil<T>::ParamTag; }
+            T read() const noexcept { return Param<T>::readData(*this); }
+            void write(T value) const noexcept { return Param<T>::writeData(*this, value); }
+        };
+
+        template<>
+        struct ParamData<void> : FSTD_ModuleParamData {
+            using Type = ParamData;
+            using FStd = FSTD_ModuleParamData;
+            constexpr ParamData() noexcept = default;
+            constexpr ParamData(const FStd &other) noexcept : FStd(other) {};
+            constexpr ParamData(const ParamData &other) noexcept = default;
+            constexpr ParamData(ParamData &&other) noexcept = default;
+            constexpr ParamData &operator=(const ParamData &other) noexcept = default;
+            constexpr ParamData &operator=(ParamData &&other) noexcept = default;
+
+            ParamTag tag() const noexcept { return static_cast<ParamTag>(fstd_module_param_data_tag(*this)); }
+            template<typename T>
+            T read() const noexcept {
+                fstd_dbg_assert(this->tag() == ParamUtil<T>::ParamTag);
+                ParamData<T> param = *this;
+                return param.read();
+            }
+            template<typename T>
+            void write(T value) const noexcept {
+                fstd_dbg_assert(this->tag() == ParamUtil<T>::ParamTag);
+                ParamData<T> param = *this;
+                param.write(value);
+            }
+        };
+
+        template<typename T>
+        struct SymbolUtil {
+            using SymbolPtr = T const *;
+            using SymbolRef = T const &;
+
+            constexpr static void const *asPtr(SymbolRef ref) { return &ref; }
+            constexpr static SymbolPtr ptrFromPtr(void const *ptr) { return static_cast<SymbolPtr>(ptr); }
+            constexpr static SymbolRef refFromPtr(void const *ptr) { return *static_cast<SymbolPtr>(ptr); }
+        };
+
+        template<>
+        struct SymbolUtil<void> {
+            using SymbolPtr = void const *;
+            using SymbolRef = void const *;
+
+            constexpr static void const *asPtr(SymbolRef ref) { return ref; }
+            constexpr static SymbolPtr ptrFromPtr(void const *ptr) { return ptr; }
+            constexpr static SymbolRef refFromPtr(void const *ptr) { return ptr; }
+        };
+
+        template<typename Ret, typename... Args>
+        struct SymbolUtil<Ret (*)(Args...)> {
+            using SymbolPtr = Ret (*)(Args...);
+            using SymbolRef = Ret (&)(Args...);
+
+            static void const *asPtr(SymbolRef ref) { return reinterpret_cast<const void *>(ref); }
+            static SymbolPtr ptrFromPtr(void const *ptr) {
+                return reinterpret_cast<SymbolPtr>(const_cast<void *>(ptr));
+            }
+            static SymbolRef refFromPtr(void const *ptr) {
+                return *reinterpret_cast<SymbolPtr>(const_cast<void *>(ptr));
+            }
+        };
+
+        template<typename T>
+        struct SymbolId : FSTD_ModuleSymbol {
+            using Type = SymbolId;
+            using FStd = FSTD_ModuleSymbol;
+            constexpr SymbolId() noexcept = default;
+            constexpr SymbolId(StrConst name, Version version) noexcept : SymbolId(name, "", version) {};
+            constexpr SymbolId(StrConst name, StrConst ns, Version version) noexcept :
+                FStd{.name = name, .ns = ns, .version = version} {};
+            constexpr SymbolId(const FStd &other) noexcept : FStd(other) {};
+            constexpr SymbolId(const SymbolId &other) noexcept = default;
+            constexpr SymbolId(SymbolId &&other) noexcept = default;
+            constexpr SymbolId &operator=(const SymbolId &other) noexcept = default;
+            constexpr SymbolId &operator=(SymbolId &&other) noexcept = default;
+
+            using SymbolPtr = SymbolUtil<T>::SymbolPtr;
+            using SymbolRef = SymbolUtil<T>::SymbolRef;
+        };
+
+        template<typename T, typename Unique = decltype([] {})>
+        struct Symbol {
+            constexpr Symbol(StrConst name, Version version) noexcept : Symbol(name, "", version) {};
+            constexpr Symbol(StrConst name, StrConst ns, Version version) noexcept :
+                name(name), ns(ns), version(version) {};
+            constexpr Symbol(const Symbol &other) noexcept = default;
+            constexpr Symbol(Symbol &&other) noexcept = default;
+            constexpr Symbol &operator=(const Symbol &other) noexcept = default;
+            constexpr Symbol &operator=(Symbol &&other) noexcept = default;
+            constexpr operator SymbolId<T>() const noexcept { return {this->name, this->ns, this->version}; }
+            constexpr SymbolId<T> asId() const noexcept { return static_cast<SymbolId<T>>(*this); }
+
+            StrConst name;
+            StrConst ns;
+            Version version;
+
+            using SymbolPtr = typename SymbolUtil<T>::SymbolPtr;
+            using SymbolRef = typename SymbolId<T>::SymbolRef;
+            static SymbolPtr getPtr() noexcept {
+                auto &handle = getHandle();
+                return SymbolUtil<T>::ptrFromPtr(handle.handle);
+            }
+            static SymbolRef get() noexcept {
+                auto &handle = getHandle();
+                return SymbolUtil<T>::refFromPtr(handle.handle);
+            }
+            static void bind(SymbolRef symbol) noexcept {
+                auto &handle = getHandle();
+                fstd__ref_counted_handle_register(&handle, SymbolUtil<T>::asPtr(symbol));
+            }
+            static void unbind() noexcept {
+                auto &handle = getHandle();
+                fstd__ref_counted_handle_unregister(&handle);
+            }
+            static FSTD__RefCountedHandle &getHandle() noexcept {
+                static constinit FSTD__RefCountedHandle handle = {};
+                return handle;
+            }
+        };
+
+        struct Handle {
+            using Type = Handle;
+            using FStd = FSTD_ModuleHandle *;
+            constexpr Handle() noexcept = default;
+            constexpr Handle(const FStd &other) noexcept : handle(other) {};
+            constexpr Handle(const Handle &other) noexcept = default;
+            constexpr Handle(Handle &&other) noexcept = default;
+            constexpr Handle &operator=(const Handle &other) noexcept = default;
+            constexpr Handle &operator=(Handle &&other) noexcept = default;
+            constexpr operator FSTD_ModuleHandle *() const noexcept { return this->handle; };
+
+            FSTD_ModuleHandle *handle;
+
+            StrConst name() const noexcept { return fstd_module_handle_name(this->handle); }
+            StrConst description() const noexcept { return fstd_module_handle_description(this->handle); }
+            StrConst license() const noexcept { return fstd_module_handle_license(this->handle); }
+            Path modulePath() const noexcept { return fstd_module_handle_module_path(this->handle); }
+            void ref() const noexcept { return fstd_module_handle_ref(this->handle); }
+            void unref() const noexcept { return fstd_module_handle_unref(this->handle); }
+            void markUnloadable() const noexcept { return fstd_module_handle_mark_unloadable(this->handle); }
+            bool isLoaded() const noexcept { return fstd_module_handle_is_loaded(this->handle); }
+            bool tryRefInstanceStrong() const noexcept {
+                return fstd_module_handle_try_ref_instance_strong(this->handle);
+            }
+            void unrefInstanceStrong() const noexcept { return fstd_module_handle_unref_instance_strong(this->handle); }
+            static std::expected<Handle, Status> findByName(StrConst module) noexcept {
+                Handle handle{};
+                Status status = static_cast<Status>(fstd_module_handle_find_by_name(&handle.handle, module));
+                if (status != Status::Ok)
+                    return std::unexpected(status);
+                return handle;
+            }
+            template<typename T>
+            static std::expected<Handle, Status> findBySymbol(SymbolId<T> symbol) noexcept {
+                Handle handle{};
+                Status status = static_cast<Status>(fstd_module_handle_find_by_symbol(&handle.handle, symbol));
+                if (status != Status::Ok)
+                    return std::unexpected(status);
+                return handle;
+            }
+        };
+
+        // NOLINTNEXTLINE(performance-enum-size)
+        enum class Dependency : FSTD_ModuleDependency {
+            None = FSTD_ModuleDependency_None,
+            Static = FSTD_ModuleDependency_Static,
+            Dynamic = FSTD_ModuleDependency_Dynamic,
+        };
+
+        struct Instance {
+            using Type = Instance;
+            using FStd = FSTD_ModuleInstance *;
+            constexpr Instance() noexcept = default;
+            constexpr Instance(const FStd &other) noexcept : handle(other) {};
+            constexpr Instance(const Instance &other) noexcept = default;
+            constexpr Instance(Instance &&other) noexcept = default;
+            constexpr Instance &operator=(const Instance &other) noexcept = default;
+            constexpr Instance &operator=(Instance &&other) noexcept = default;
+            constexpr operator FSTD_ModuleInstance *() const noexcept { return this->handle; };
+
+            FSTD_ModuleInstance *handle;
+
+            Param<void> *const *FSTD_MAYBE_NULL parameters() const noexcept {
+                return reinterpret_cast<Param<void> *const *>(fstd_module_instance_parameters(this->handle));
+            }
+            Path const *FSTD_MAYBE_NULL resources() const noexcept {
+                return reinterpret_cast<Path const *>(fstd_module_instance_resources(this->handle));
+            }
+            const void *const *FSTD_MAYBE_NULL imports() const noexcept {
+                return fstd_module_instance_imports(this->handle);
+            }
+            const void *const *FSTD_MAYBE_NULL exports() const noexcept {
+                return fstd_module_instance_exports(this->handle);
+            }
+            Handle moduleHandle() const noexcept { return fstd_module_instance_handle(this->handle); }
+            Ctx ctxHandle() const noexcept { return fstd_module_instance_ctx_handle(this->handle); }
+            void const *FSTD_MAYBE_NULL state() const noexcept { return fstd_module_instance_state(this->handle); }
+
+            void ref() const noexcept { return fstd_module_instance_ref(this->handle); }
+            void unref() const noexcept { return fstd_module_instance_unref(this->handle); }
+            Dependency queryNs(StrConst ns) const noexcept {
+                return static_cast<Dependency>(fstd_module_instance_query_namespace(this->handle, ns));
+            }
+            Status addNs(StrConst ns) const noexcept {
+                return static_cast<Status>(fstd_module_instance_add_namespace(this->handle, ns));
+            }
+            Status removeNs(StrConst ns) const noexcept {
+                return static_cast<Status>(fstd_module_instance_remove_namespace(this->handle, ns));
+            }
+            Dependency queryDep(Handle handle) const noexcept {
+                return static_cast<Dependency>(fstd_module_instance_query_dependency(this->handle, handle.handle));
+            }
+            Status addDep(Handle handle) const noexcept {
+                return static_cast<Status>(fstd_module_instance_add_dependency(this->handle, handle.handle));
+            }
+            Status removeDep(Handle handle) const noexcept {
+                return static_cast<Status>(fstd_module_instance_remove_dependency(this->handle, handle.handle));
+            }
+            template<typename T>
+            std::expected<typename SymbolId<T>::SymbolPtr, Status> loadSymbol(SymbolId<T> symbol) const noexcept {
+                void const *loaded;
+                Status status = static_cast<Status>(fstd_module_instance_load_symbol(this->handle, symbol, &loaded));
+                if (status != Status::Ok)
+                    return std::unexpected(status);
+                return SymbolUtil<T>::ptrFromPtr(loaded);
+            }
+            template<typename T>
+            std::expected<T, Status> readParameter(StrConst module, StrConst parameter) const noexcept {
+                T value;
+                ParamTag tag = ParamUtil<T>::ParamTag;
+                Status status = static_cast<Status>(fstd_module_instance_read_parameter_opaque(
+                        this->handle, static_cast<FSTD_ModuleParamTag>(tag), module, parameter, &value));
+                if (status != Status::Ok)
+                    return std::unexpected(status);
+                return value;
+            }
+            template<typename T>
+            Status writeParameter(StrConst module, StrConst parameter, const T &value) const noexcept {
+                ParamTag tag = ParamUtil<T>::ParamTag;
+                Status status = static_cast<Status>(fstd_module_instance_write_parameter_opaque(
+                        this->handle, static_cast<FSTD_ModuleParamTag>(tag), module, parameter, &value));
+                return status;
+            }
+        };
+
+        struct RootInstance {
+            using Type = RootInstance;
+            using FStd = FSTD_ModuleRootInstance *;
+            constexpr RootInstance() noexcept = default;
+            constexpr RootInstance(const FStd &other) noexcept : handle(other) {};
+            constexpr RootInstance(const RootInstance &other) noexcept = default;
+            constexpr RootInstance(RootInstance &&other) noexcept = default;
+            constexpr RootInstance &operator=(const RootInstance &other) noexcept = default;
+            constexpr RootInstance &operator=(RootInstance &&other) noexcept = default;
+            constexpr operator FSTD_ModuleRootInstance *() const noexcept { return this->handle; };
+
+            FSTD_ModuleRootInstance *handle;
+
+            static std::expected<RootInstance, Status> init() noexcept {
+                RootInstance inst{};
+                Status status = static_cast<Status>(fstd_module_root_instance_init(&inst.handle));
+                if (status != Status::Ok)
+                    return std::unexpected(status);
+                return inst;
+            }
+            void deinit() const noexcept { return fstd_module_root_instance_deinit(this->handle); }
+            Dependency queryNs(StrConst ns) const noexcept {
+                return static_cast<Dependency>(fstd_module_root_instance_query_namespace(this->handle, ns));
+            }
+            Status addNs(StrConst ns) const noexcept {
+                return static_cast<Status>(fstd_module_root_instance_add_namespace(this->handle, ns));
+            }
+            Status removeNs(StrConst ns) const noexcept {
+                return static_cast<Status>(fstd_module_root_instance_remove_namespace(this->handle, ns));
+            }
+            Dependency queryDep(Handle handle) const noexcept {
+                return static_cast<Dependency>(fstd_module_root_instance_query_dependency(this->handle, handle.handle));
+            }
+            Status addDep(Handle handle) const noexcept {
+                return static_cast<Status>(fstd_module_root_instance_add_dependency(this->handle, handle.handle));
+            }
+            Status removeDep(Handle handle) const noexcept {
+                return static_cast<Status>(fstd_module_root_instance_remove_dependency(this->handle, handle.handle));
+            }
+            template<typename T>
+            std::expected<typename SymbolId<T>::SymbolPtr, Status> loadSymbol(SymbolId<T> symbol) const noexcept {
+                void const *loaded;
+                Status status =
+                        static_cast<Status>(fstd_module_root_instance_load_symbol(this->handle, symbol, &loaded));
+                if (status != Status::Ok)
+                    return std::unexpected(status);
+                return SymbolUtil<T>::ptrFromPtr(loaded);
+            }
+            template<typename T>
+            std::expected<T, Status> readParameter(StrConst module, StrConst parameter) const noexcept {
+                T value;
+                ParamTag tag = ParamUtil<T>::ParamTag;
+                Status status = static_cast<Status>(fstd_module_root_instance_read_parameter_opaque(
+                        this->handle, static_cast<FSTD_ModuleParamTag>(tag), module, parameter, &value));
+                if (status != Status::Ok)
+                    return std::unexpected(status);
+                return value;
+            }
+            template<typename T>
+            Status writeParameter(StrConst module, StrConst parameter, const T &value) const noexcept {
+                ParamTag tag = ParamUtil<T>::ParamTag;
+                Status status = static_cast<Status>(fstd_module_root_instance_write_parameter_opaque(
+                        this->handle, static_cast<FSTD_ModuleParamTag>(tag), module, parameter, &value));
+                return status;
+            }
+        };
+
+        // template<typename T>
+        // struct ExportParameter {
+        //     constexpr ExportParameter(const StrConst &name, T default_value) noexcept :
+        //         name(name), read_group(AccessGroup::Private), write_group(AccessGroup::Private), read(nullptr),
+        //         write(nullptr), default_value(default_value) {}
+        //     constexpr ExportParameter(const StrConst &name, AccessGroup read_group, AccessGroup write_group,
+        //                               T default_value) noexcept :
+        //         name(name), read_group(read_group), write_group(write_group), read(nullptr), write(nullptr),
+        //         default_value(default_value) {}
+        //     constexpr ExportParameter(const StrConst &name, AccessGroup read_group, AccessGroup write_group,
+        //                               auto &&read, auto &&write, T default_value) noexcept :
+        //         name(name), read_group(read_group), write_group(write_group), read(read), write(write),
+        //         default_value(default_value) {}
+        //     constexpr ExportParameter(const ExportParameter &other) noexcept = default;
+        //     constexpr ExportParameter(ExportParameter &&other) noexcept = default;
+        //     constexpr ExportParameter &operator=(const ExportParameter &other) noexcept = default;
+        //     constexpr ExportParameter &operator=(ExportParameter &&other) noexcept = default;
+        //     constexpr operator FSTD_ModuleExportParameter() const noexcept {
+        //         FSTD_ModuleExportParameter param;
+        //         param.name = this->name;
+        //         param.tag = static_cast<FSTD_ModuleParamTag>(this->tag);
+        //         param.read_group = static_cast<FSTD_ModuleAccessGroup>(this->read_group);
+        //         param.write_group = static_cast<FSTD_ModuleAccessGroup>(this->write_group);
+        //         param.read = this->read;
+        //         param.write = this->write;
+
+        //         using BaseType = ParamUtil<T>::BaseType;
+        //         if constexpr (std::is_same_v<BaseType, u8>) {
+        //             param.u8 = this->default_value;
+        //         }
+        //         else if constexpr (std::is_same_v<BaseType, u16>) {
+        //             param.u16 = this->default_value;
+        //         }
+        //         else if constexpr (std::is_same_v<BaseType, u32>) {
+        //             param.u32 = this->default_value;
+        //         }
+        //         else if constexpr (std::is_same_v<BaseType, u64>) {
+        //             param.u64 = this->default_value;
+        //         }
+        //         else if constexpr (std::is_same_v<BaseType, i8>) {
+        //             param.i8 = this->default_value;
+        //         }
+        //         else if constexpr (std::is_same_v<BaseType, i16>) {
+        //             param.i16 = this->default_value;
+        //         }
+        //         else if constexpr (std::is_same_v<BaseType, i32>) {
+        //             param.i32 = this->default_value;
+        //         }
+        //         else if constexpr (std::is_same_v<BaseType, i64>) {
+        //             param.i64 = this->default_value;
+        //         }
+
+        //         return param;
+        //     }
+
+        //     StrConst name;
+        //     constexpr static ParamTag tag = ParamUtil<T>::ParamTag;
+        //     AccessGroup read_group;
+        //     AccessGroup write_group;
+        //     void (*FSTD_MAYBE_NULL read)(ParamData<T> data, void *value);
+        //     void (*FSTD_MAYBE_NULL write)(ParamData<T> data, void const *value);
+        //     T default_value;
+        // };
+
+        template<typename T>
+        struct SymbolIdExt : FSTD_ModuleSymbolExt {
+            using Type = SymbolIdExt;
+            using FStd = FSTD_ModuleSymbolExt;
+            constexpr SymbolIdExt() noexcept = default;
+            template<typename Unique>
+            constexpr SymbolIdExt(const Symbol<T, Unique> &sym) noexcept :
+                FSTD_ModuleSymbolExt{
+                        .id = sym,
+                        .bind = +[](void const *ptr) { Symbol<T, Unique>::bind(SymbolUtil<T>::refFromPtr(ptr)); },
+                        .unbind = Symbol<T, Unique>::unbind,
+                } {};
+            constexpr SymbolIdExt(const FStd &other) noexcept : FStd(other) {};
+            constexpr SymbolIdExt(const SymbolIdExt &other) noexcept = default;
+            constexpr SymbolIdExt(SymbolIdExt &&other) noexcept = default;
+            constexpr SymbolIdExt &operator=(const SymbolIdExt &other) noexcept = default;
+            constexpr SymbolIdExt &operator=(SymbolIdExt &&other) noexcept = default;
+            constexpr operator SymbolId<T>() const noexcept {
+                return {
+                        {this->id.name.ptr, this->id.name.len},
+                        {this->id.ns.ptr, this->id.ns.len},
+                        this->id.version,
+                };
+            }
+        };
+
+        // NOLINTNEXTLINE(performance-enum-size)
+        enum class SymbolType : FSTD_ModuleExportSymbolType {
+            Static = FSTD_ModuleExportSymbolType_Static,
+            StateOffset = FSTD_ModuleExportSymbolType_StateOffset,
+            Dynamic = FSTD_ModuleExportSymbolType_Dynamic,
+        };
+
+        // NOLINTNEXTLINE(performance-enum-size)
+        enum class SymbolLinkage : FSTD_ModuleExportSymbolLinkage {
+            Global = FSTD_ModuleExportSymbolLinkage_Global,
+        };
+
+        template<typename T>
+        struct SymbolExport {
+            constexpr SymbolExport() noexcept = default;
+            template<typename Unique>
+            constexpr SymbolExport(const Symbol<T, Unique> &sym, typename Symbol<T>::SymbolRef value) noexcept :
+                SymbolExport(static_cast<SymbolIdExt<T>>(sym), SymbolLinkage::Global, value) {}
+            constexpr SymbolExport(const SymbolIdExt<T> &sym, typename Symbol<T>::SymbolRef value) noexcept :
+                SymbolExport(sym, SymbolLinkage::Global, value) {}
+            template<typename Unique>
+            constexpr SymbolExport(const Symbol<T, Unique> &sym, SymbolLinkage linkage,
+                                   typename Symbol<T>::SymbolRef value) noexcept :
+                SymbolExport(static_cast<SymbolIdExt<T>>(sym), linkage, value) {}
+            constexpr SymbolExport(const SymbolIdExt<T> &sym, SymbolLinkage linkage,
+                                   typename Symbol<T>::SymbolRef value) noexcept :
+                symbol(sym), type(SymbolType::Static), linkage(linkage), static_value(&value) {};
+
+            template<auto Member, typename Unique>
+            constexpr SymbolExport(const Symbol<T, Unique> &sym, detail::StaticValue<Member> value) noexcept :
+                SymbolExport(static_cast<SymbolIdExt<T>>(sym), SymbolLinkage::Global, value) {}
+            template<auto Member>
+            constexpr SymbolExport(const SymbolIdExt<T> &sym, detail::StaticValue<Member> value) noexcept :
+                SymbolExport(sym, SymbolLinkage::Global, value) {}
+            template<auto Member, typename Unique>
+            constexpr SymbolExport(const Symbol<T, Unique> &sym, SymbolLinkage linkage,
+                                   detail::StaticValue<Member> value) noexcept :
+                SymbolExport(static_cast<SymbolIdExt<T>>(sym), linkage, value){};
+            template<auto Member>
+            constexpr SymbolExport(const SymbolIdExt<T> &sym, SymbolLinkage linkage,
+                                   detail::StaticValue<Member>) noexcept :
+                symbol(sym), type(SymbolType::StateOffset), linkage(linkage),
+                state_offset(detail::offsetOf<Member>()){};
+
+            constexpr SymbolExport(const SymbolExport &other) noexcept = default;
+            constexpr SymbolExport(SymbolExport &&other) noexcept = default;
+            constexpr SymbolExport &operator=(const SymbolExport &other) noexcept = default;
+            constexpr SymbolExport &operator=(SymbolExport &&other) noexcept = default;
+
+            template<typename Parent>
+            consteval void assertParent() {}
+
+            SymbolIdExt<T> symbol;
+            SymbolType type;
+            SymbolLinkage linkage;
+            union {
+                SymbolUtil<T>::SymbolPtr static_value;
+                usize state_offset;
+                struct {
+                    using SymbolPtr = std::remove_const_t<typename SymbolUtil<T>::SymbolPtr>;
+                    using InitPollResult = FSTD_Fallible(SymbolPtr);
+                    bool (*poll_init)(Instance ctx, tasks::Waker waker, InitPollResult &result);
+                    bool (*FSTD_MAYBE_NULL poll_deinit)(Instance ctx, tasks::Waker waker, SymbolPtr value);
+                } dynamic_value;
+            };
+        };
+
+        template<auto Member, typename... Args>
+        static consteval SymbolExport<typename detail::MemberPointerInfo<Member>::Type>
+        makeMemberExport(Args &&...args) {
+            return SymbolExport{std::forward<Args>(args)..., detail::StaticValue<Member>{}};
         }
-        PollResult<std::expected<ResolvedModule, Result>> pollModule(TaskWaker waker,
-                                                                     Slice<const char> module) const noexcept {
+
+
+        // template<typename... Ts>
+        // struct ParameterList {
+        //     constexpr ParameterList(const ExportParameter<Ts> &...args) noexcept : arr{args...} {}
+        //     constexpr ParameterList(const std::array<FSTD_ModuleExportParameter, sizeof...(Ts)> &exports) noexcept :
+        //         arr{exports} {};
+        //     constexpr ParameterList(const ParameterList &other) noexcept = default;
+        //     constexpr ParameterList(ParameterList &&other) noexcept = default;
+        //     constexpr ParameterList &operator=(const ParameterList &other) noexcept = default;
+        //     constexpr ParameterList &operator=(ParameterList &&other) noexcept = default;
+
+        //     constexpr static usize NumExports = sizeof...(Ts);
+        //     std::array<FSTD_ModuleExportParameter, NumExports> arr;
+
+        //     template<usize Index>
+        //     constexpr std::tuple_element_t<Index, std::tuple<ExportParameter<Ts>...>> get() noexcept {
+        //         return this->arr[Index];
+        //     }
+        //     template<typename T>
+        //     constexpr ExportParameter<Ts..., T> withImpl(const ExportParameter<T> &sym) noexcept {
+        //         std::array<FSTD_ModuleExportParameter, sizeof...(Ts) + 1> arr{};
+        //         for (usize i = 0; i < NumExports; i++) {
+        //             arr[i] = this->arr[i];
+        //         }
+        //         arr[NumExports] = sym;
+        //         return {arr};
+        //     }
+        //     template<typename... Args>
+        //     constexpr auto with(Args &&...args) noexcept -> decltype(auto) {
+        //         ExportParameter param{std::forward<Args>(args)...};
+        //         return this->withImpl(param);
+        //     }
+        // };
+
+        template<typename... Ts>
+        struct SymbolImportList {
+            template<typename... Us>
+            constexpr SymbolImportList(const Symbol<Ts, Us> &...args) noexcept :
+                SymbolImportList(static_cast<SymbolIdExt<Ts>>(args)...) {}
+            constexpr SymbolImportList(const SymbolIdExt<Ts> &...args) noexcept : arr{args...} {}
+            constexpr SymbolImportList(const std::array<FSTD_ModuleSymbolExt, sizeof...(Ts)> &imports) noexcept :
+                arr{imports} {};
+            constexpr SymbolImportList(const SymbolImportList &other) noexcept = default;
+            constexpr SymbolImportList(SymbolImportList &&other) noexcept = default;
+            constexpr SymbolImportList &operator=(const SymbolImportList &other) noexcept = default;
+            constexpr SymbolImportList &operator=(SymbolImportList &&other) noexcept = default;
+
+            constexpr static usize NumImports = sizeof...(Ts);
+            std::array<FSTD_ModuleSymbolExt, NumImports> arr;
+
+            template<usize Index>
+            constexpr std::tuple_element_t<Index, std::tuple<SymbolIdExt<Ts>...>> get() noexcept {
+                return this->arr[Index];
+            }
+            template<typename... Us>
+            constexpr SymbolImportList<Ts..., Us...> with(const SymbolImportList<Us...> &other) noexcept {
+                std::array<FSTD_ModuleSymbolExt, sizeof...(Ts) + sizeof...(Us)> arr{};
+                for (usize i = 0; i < NumImports; i++) {
+                    arr[i] = this->arr[i];
+                }
+                for (usize i = 0; i < other.NumImports; i++) {
+                    arr[NumImports + i] = other.arr[i];
+                }
+                return {arr};
+            }
+            template<typename T>
+            constexpr SymbolImportList<Ts..., T> with(const SymbolIdExt<T> &sym) noexcept {
+                std::array<FSTD_ModuleSymbolExt, sizeof...(Ts) + 1> imports{};
+                for (usize i = 0; i < NumImports; i++) {
+                    imports[i] = this->arr[i];
+                }
+                imports[NumImports] = sym;
+                return {imports};
+            }
+            template<typename T, typename Unique>
+            constexpr SymbolImportList<Ts..., T> with(const Symbol<T, Unique> &sym) noexcept {
+                return this->with(static_cast<SymbolIdExt<T>>(sym));
+            }
+        };
+
+        template<typename... Ts>
+        struct SymbolExportList {
+            constexpr SymbolExportList(const SymbolExport<Ts> &...args) noexcept : symbols() {
+                copyToTuple(this->symbols, args..., std::make_index_sequence<sizeof...(Ts)>{});
+            }
+            constexpr SymbolExportList(const SymbolExportList &other) noexcept = default;
+            constexpr SymbolExportList(SymbolExportList &&other) noexcept = default;
+            constexpr SymbolExportList &operator=(const SymbolExportList &other) noexcept = default;
+            constexpr SymbolExportList &operator=(SymbolExportList &&other) noexcept = default;
+
+            constexpr static usize NumExports = sizeof...(Ts);
+            detail::Tuple<SymbolExport<Ts>...> symbols;
+
+            template<usize... I>
+            static constexpr void copyToTuple(auto &tuple, const SymbolExport<Ts> &...args, std::index_sequence<I...>) {
+                ((tuple.template getMember<I>() = args), ...);
+            }
+            template<typename T, usize... I>
+            constexpr SymbolExportList<Ts..., T> withImpl(const SymbolExport<T> &sym,
+                                                          std::index_sequence<I...>) noexcept {
+                return {this->symbols.template getMember<I>()..., sym};
+            }
+            template<typename... Args>
+            constexpr auto with(Args &&...args) noexcept -> decltype(auto) {
+                SymbolExport exp{std::forward<Args>(args)...};
+                return this->withImpl(exp, std::make_index_sequence<sizeof...(Ts)>{});
+            }
+        };
+
+        struct Export;
+        struct Loader {
+            using Type = Loader;
+            using FStd = FSTD_ModuleLoader *;
+            constexpr Loader() noexcept = default;
+            constexpr Loader(const FStd &other) noexcept : handle(other) {};
+            constexpr Loader(const Loader &other) noexcept = default;
+            constexpr Loader(Loader &&other) noexcept = default;
+            constexpr Loader &operator=(const Loader &other) noexcept = default;
+            constexpr Loader &operator=(Loader &&other) noexcept = default;
+            constexpr operator FSTD_ModuleLoader *() const noexcept { return this->handle; };
+
+            struct ResolvedModule {
+                std::optional<Handle> handle;
+                const Export &module;
+            };
+
+            // NOLINTNEXTLINE(performance-enum-size)
+            enum class FilterRequest : FSTD_ModuleLoaderFilterRequest {
+                Skip = FSTD_ModuleLoaderFilterRequest_Skip,
+                Load = FSTD_ModuleLoaderFilterRequest_Load,
+            };
+
+            FSTD_ModuleLoader *handle;
+
+            static std::expected<Loader, Status> init() noexcept {
+                Loader loader;
+                Status status = static_cast<Status>(fstd_module_loader_init(&loader.handle));
+                if (status != Status::Ok)
+                    return std::unexpected(status);
+                return loader;
+            }
+            void deinit() const noexcept { return fstd_module_loader_deinit(this->handle); }
+            bool containsModule(StrConst module) const noexcept {
+                return fstd_module_loader_contains_module(this->handle, module);
+            }
+            template<typename T>
+            bool containsSymbol(SymbolId<T> symbol) const noexcept {
+                return fstd_module_loader_contains_symbol(this->handle, symbol);
+            }
+            tasks::PollResult<std::expected<ResolvedModule, Result>> pollModule(tasks::Waker waker,
+                                                                                StrConst module) const noexcept;
+            auto pollModuleFuture(StrConst module) const noexcept -> decltype(auto) {
+                struct Future {
+                    Loader loader;
+                    StrConst module;
+                    using ResultType = std::expected<ResolvedModule, Result>;
+                    tasks::PollResult<ResultType> poll(tasks::Waker waker) const noexcept {
+                        return this->loader.pollModule(waker, this->module);
+                    }
+                };
+                return Future{.loader = *this, .module = module};
+            }
+            Status addModule(Instance owner, const Export &module) const noexcept;
+            Status addModulesFromPath(Path path, auto &&filter) const noexcept;
+            Status addModulesFromIter(auto &&filter) const noexcept;
+            tasks::OpaqueFuture<Result> commit() const noexcept {
+                return std::bit_cast<tasks::OpaqueFuture<Result>>(fstd_module_loader_commit(this->handle));
+            }
+        };
+
+#ifdef FSTD_PLATFORM_WINDOWS
+#define FSTD_CXX_EXPORT_MODULE(Info)                                                                                   \
+    __declspec(allocate(FSTD__MODULE_SECTION)) constinit const ::fstd::modules::Export *FSTD_IDENT(                    \
+            fstd__cxx_module_export_) = &decltype(Info)::moduleExport();
+#else
+#define FSTD_CXX_EXPORT_MODULE(info)                                                                                   \
+    constexpr static const ::fstd::modules::Export *FSTD_IDENT(fstd__cxx_module_export_)                               \
+            __attribute__((retain, used, section(FSTD__MODULE_SECTION))) = &decltype(Info)::moduleExport();
+#endif
+
+        struct Export {
+            using Type = Export;
+            using FStd = FSTD_ModuleExport;
+            constexpr Export() noexcept = default;
+            template<typename... Imports, typename... Exports, typename OnEvent>
+            constexpr Export(const StrConst &name, const StrConst &description, const StrConst &author,
+                             const StrConst &license, const Slice<const Path> &resources,
+                             const Slice<const StrConst> &namespaces, const SymbolImportList<Imports...> &imports,
+                             const SymbolExportList<Exports...> &exports, OnEvent &&on_event) noexcept {
+                this->version = CtxVersion;
+                this->name = name;
+                this->description = description;
+                this->author = author;
+                this->license = license;
+                this->parameters = {};
+                this->resources = resources;
+                this->namespaces = namespaces;
+                this->imports = imports.arr;
+                this->exports = {static_cast<const void *>(&exports.symbols), exports.NumExports};
+                this->on_event = on_event;
+            }
+            constexpr Export(const Export &other) noexcept = default;
+            constexpr Export(Export &&other) noexcept = default;
+            constexpr Export &operator=(const Export &other) noexcept = default;
+            constexpr Export &operator=(Export &&other) noexcept = default;
+
+            Version version;
+            StrConst name;
+            StrConst description;
+            StrConst author;
+            StrConst license;
+            detail::ConstUnknownSlice parameters;
+            Slice<const Path> resources;
+            Slice<const StrConst> namespaces;
+            Slice<const FSTD_ModuleSymbolExt> imports;
+            detail::ConstUnknownSlice exports;
+            void (*on_event)(const FSTD_ModuleExport *module, FSTD_ModuleExportEventTag *tag);
+
+            template<typename T>
+            static consteval auto createModule() {
+                constexpr static StrConst Name = T::Name;
+                constexpr static StrConst Description = []() -> StrConst {
+                    if constexpr (requires { T::Description; }) {
+                        return T::Description;
+                    }
+                    else {
+                        return "";
+                    }
+                }();
+                constexpr static StrConst Author = []() -> StrConst {
+                    if constexpr (requires { T::Author; }) {
+                        return T::Author;
+                    }
+                    else {
+                        return "";
+                    }
+                }();
+                constexpr static StrConst License = []() -> StrConst {
+                    if constexpr (requires { T::License; }) {
+                        return T::License;
+                    }
+                    else {
+                        return "";
+                    }
+                }();
+                constexpr static auto Resources = [] {
+                    if constexpr (requires { T::Resources; }) {
+                        return T::Resources;
+                    }
+                    else {
+                        return std::array<Path, 0>{};
+                    }
+                }();
+                constexpr static auto NumNamespaces = [] -> usize {
+                    usize count = 0;
+                    if constexpr (requires { T::Imports; }) {
+                        for (usize i = 0; i < T::Imports.NumImports; i++) {
+                            StrConst ns = T::Imports.arr[i].id.ns;
+                            if (ns.empty())
+                                continue;
+                            bool found = false;
+                            for (usize j = 0; j < i; j++) {
+                                StrConst other = T::Imports.arr[j].id.ns;
+                                if (ns == other) {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if (!found)
+                                count++;
+                        }
+                    }
+                    return count;
+                }();
+                constexpr static auto Namespaces = [] {
+                    usize next = 0;
+                    std::array<StrConst, NumNamespaces> namespaces{};
+                    if constexpr (requires { T::Imports; }) {
+                        for (usize i = 0; i < T::Imports.NumImports; i++) {
+                            StrConst ns = T::Imports.arr[i].id.ns;
+                            if (ns.empty())
+                                continue;
+                            bool found = false;
+                            for (usize j = 0; j < i; j++) {
+                                StrConst other = T::Imports.arr[j].id.ns;
+                                if (ns == other) {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if (!found) {
+                                namespaces[next] = ns;
+                                next++;
+                            }
+                        }
+                    }
+                    return namespaces;
+                }();
+                constexpr static auto Imports = [] {
+                    if constexpr (requires { T::Imports; }) {
+                        return T::Imports;
+                    }
+                    else {
+                        return SymbolImportList<>{};
+                    }
+                }();
+                constexpr static auto Exports = [] {
+                    if constexpr (requires { T::Exports; }) {
+                        return T::Exports;
+                    }
+                    else {
+                        return SymbolExportList<>{};
+                    }
+                }();
+                using State = decltype([] {
+                    if constexpr (requires { typename T::State; }) {
+                        return std::type_identity<typename T::State>{};
+                    }
+                    else {
+                        return std::type_identity<T>{};
+                    }
+                }())::type;
+
+                struct GlobalData {
+                    bool is_init;
+                    Instance instance;
+                    State *state;
+                    alignas(State) unsigned char storage[sizeof(State)];
+
+                    static GlobalData &get() noexcept {
+                        constinit static GlobalData data = {};
+                        return data;
+                    }
+                };
+                constexpr static auto OnEvent = [](FSTD_ModuleExport const *module_export,
+                                                   FSTD_ModuleExportEventTag *tag) {
+                    switch (*tag) {
+                        case FSTD_ModuleExportEventTag_BindCtx:
+                            if constexpr (requires { T::onBind; }) {
+                                FSTD_ModuleExportEventBindCtx *event =
+                                        fstd_parent_of(FSTD_ModuleExportEventBindCtx, tag, tag);
+                                event->bind = [](FSTD_Ctx *cctx) noexcept {
+                                    Ctx ctx = cctx;
+                                    std::invoke_r<void>(T::onBind, ctx);
+                                };
+                                return;
+                            };
+                            break;
+                        case FSTD_ModuleExportEventTag_UnbindCtx:
+                            if constexpr (requires { T::onUnbind; }) {
+                                FSTD_ModuleExportEventUnbindCtx *event =
+                                        fstd_parent_of(FSTD_ModuleExportEventUnbindCtx, tag, tag);
+                                event->unbind = []() noexcept { std::invoke_r<void>(T::onUnbind); };
+                                return;
+                            };
+                            break;
+                        case FSTD_ModuleExportEventTag_Init: {
+                            FSTD_ModuleExportEventInit *event = fstd_parent_of(FSTD_ModuleExportEventInit, tag, tag);
+                            if constexpr (requires { T::onInit; }) {
+                                event->poll = [](FSTD_ModuleInstance *cinstance, FSTD_ModuleLoader *cloader,
+                                                 FSTD_TaskWaker cwaker,
+                                                 FSTD_ModuleExportEventInitResult *cresult) noexcept {
+                                    auto &global = GlobalData::get();
+                                    fstd_assert(!global.is_init);
+                                    global.instance = cinstance;
+                                    Loader loader = cloader;
+                                    tasks::Waker waker = cwaker;
+                                    State *ptr = reinterpret_cast<State *>(global.storage);
+                                    auto result =
+                                            std::invoke_r<tasks::PollResult<Result>>(T::onInit, ptr, loader, waker);
+                                    if (std::holds_alternative<tasks::PollPendingType>(result)) {
+                                        return false;
+                                    }
+                                    global.is_init = true;
+                                    global.state = std::launder(ptr);
+                                    cresult->value = global.state;
+                                    cresult->result = std::get<Result>(result);
+                                    return true;
+                                };
+                            }
+                            else {
+                                event->poll = [](FSTD_ModuleInstance *instance, FSTD_ModuleLoader *, FSTD_TaskWaker,
+                                                 FSTD_ModuleExportEventInitResult *result) noexcept {
+                                    auto &global = GlobalData::get();
+                                    fstd_assert(!global.is_init);
+                                    global.is_init = true;
+                                    global.instance = instance;
+                                    global.state = std::construct_at(reinterpret_cast<State *>(global.storage));
+                                    result->value = global.state;
+                                    result->result = ResultOk;
+                                    return true;
+                                };
+                            };
+                            return;
+                        }
+                        case FSTD_ModuleExportEventTag_Deinit: {
+                            FSTD_ModuleExportEventDeinit *event =
+                                    fstd_parent_of(FSTD_ModuleExportEventDeinit, tag, tag);
+                            if constexpr (requires { T::onDeinit; }) {
+                                event->poll = [](FSTD_ModuleInstance *, FSTD_TaskWaker cwaker, void *) noexcept {
+                                    auto &global = GlobalData::get();
+                                    fstd_assert(global.is_init);
+                                    tasks::Waker waker = cwaker;
+                                    auto result =
+                                            std::invoke_r<tasks::PollResult<void>>(T::onDeinit, *global.state, waker);
+                                    if (std::holds_alternative<tasks::PollPendingType>(result)) {
+                                        return false;
+                                    }
+                                    global.is_init = false;
+                                    global.state = nullptr;
+                                    return true;
+                                };
+                            }
+                            else {
+                                event->poll = [](FSTD_ModuleInstance *, FSTD_TaskWaker, void *) noexcept {
+                                    auto &global = GlobalData::get();
+                                    fstd_assert(global.is_init);
+                                    global.is_init = false;
+                                    global.instance = {};
+                                    std::destroy_at(global.state);
+                                    global.state = nullptr;
+                                    return true;
+                                };
+                            };
+                            return;
+                        }
+                        case FSTD_ModuleExportEventTag_Start: {
+                            FSTD_ModuleExportEventStart *event = fstd_parent_of(FSTD_ModuleExportEventStart, tag, tag);
+                            if constexpr (requires { T::onStart; }) {
+                                event->poll = [](FSTD_ModuleInstance *, FSTD_TaskWaker cwaker,
+                                                 FSTD_Result *cresult) noexcept {
+                                    auto &global = GlobalData::get();
+                                    fstd_assert(global.is_init);
+                                    tasks::Waker waker = cwaker;
+                                    auto result = std::invoke_r<tasks::PollResult<Result>>(T::onStart, waker);
+                                    if (std::holds_alternative<tasks::PollPendingType>(result)) {
+                                        return false;
+                                    }
+                                    *cresult = std::get<Result>(result);
+                                    return true;
+                                };
+                            }
+                        } break;
+                        case FSTD_ModuleExportEventTag_Stop: {
+                            FSTD_ModuleExportEventStop *event = fstd_parent_of(FSTD_ModuleExportEventStop, tag, tag);
+                            if constexpr (requires { T::onStop; }) {
+                                event->poll = [](FSTD_ModuleInstance *, FSTD_TaskWaker cwaker,
+                                                 FSTD_Result *cresult) noexcept {
+                                    auto &global = GlobalData::get();
+                                    fstd_assert(global.is_init);
+                                    tasks::Waker waker = cwaker;
+                                    auto result = std::invoke_r<tasks::PollResult<Result>>(T::onStop, waker);
+                                    if (std::holds_alternative<tasks::PollPendingType>(result)) {
+                                        return false;
+                                    }
+                                    *cresult = std::get<Result>(result);
+                                    return true;
+                                };
+                            }
+                        } break;
+                        default:
+                            break;
+                    }
+                    fstd_module_export_default_on_event(module_export, tag);
+                };
+                constexpr static Export ModuleExport = {
+                        Name, Description, Author, License, Resources, Namespaces, Imports, Exports, OnEvent,
+                };
+
+                constexpr static auto loadSymbolImpl = []<typename U>(SymbolId<U> symbol) static noexcept {
+                    auto &global = GlobalData::get();
+                    fstd_dbg_assert(global.is_init);
+                    return global.instance.template loadSymbol<U>(symbol);
+                };
+                constexpr static auto readParameterImpl = []<typename U>(StrConst module,
+                                                                         StrConst parameter) static noexcept {
+                    auto &global = GlobalData::get();
+                    fstd_dbg_assert(global.is_init);
+                    return global.instance.template readParameter<U>(module, parameter);
+                };
+                constexpr static auto writeParameterImpl = []<typename U>(StrConst module, StrConst parameter,
+                                                                          const U &value) static noexcept {
+                    auto &global = GlobalData::get();
+                    fstd_dbg_assert(global.is_init);
+                    return global.instance.template writeParameter<U>(module, parameter, value);
+                };
+                struct Module {
+                    static constexpr const Export &moduleExport() noexcept { return ModuleExport; }
+                    static bool isInit() noexcept { return GlobalData::get().is_init; }
+                    static Instance instance() noexcept {
+                        fstd_dbg_assert(isInit());
+                        return GlobalData::get().instance;
+                    }
+                    static Handle moduleHandle() noexcept { return instance().moduleHandle(); }
+                    static Ctx ctxHandle() noexcept { return instance().ctxHandle(); }
+                    static State &state() noexcept {
+                        fstd_dbg_assert(isInit());
+                        return *GlobalData::get().state;
+                    }
+                    static void ref() noexcept { return instance().ref(); }
+                    static void unref() noexcept { return instance().unref(); }
+                    static Dependency queryNs(StrConst ns) noexcept { return instance().queryNs(ns); }
+                    static Status addNs(StrConst ns) noexcept { return instance().addNs(ns); }
+                    static Status removeNs(StrConst ns) noexcept { return instance().removeNs(ns); }
+                    static Dependency queryDep(Handle handle) noexcept { return instance().queryDep(handle); }
+                    static Status addDep(Handle handle) noexcept { return instance().addDep(handle); }
+                    static Status removeDep(Handle handle) noexcept { return instance().removeDep(handle); }
+                    decltype(loadSymbolImpl) loadSymbol = loadSymbolImpl;
+                    decltype(readParameterImpl) readParameter = readParameterImpl;
+                    decltype(writeParameterImpl) writeParameter = writeParameterImpl;
+                };
+                return Module{};
+            }
+        };
+
+        tasks::PollResult<std::expected<Loader::ResolvedModule, Result>>
+        Loader::pollModule(tasks::Waker waker, StrConst module) const noexcept {
             FSTD_ModuleLoaderPollModuleResult cresult;
             if (!fstd_module_loader_poll_module(this->handle, waker, module, &cresult))
-                return PollPending;
+                return tasks::PollPending;
             Result result = cresult.result;
             if (result.isErr())
                 return std::unexpected(result);
 
-            std::optional<ModuleHandle> handle =
-                    cresult.value.handle ? std::optional<ModuleHandle>{cresult.value.handle} : std::nullopt;
-            const ModuleExport *module_ptr = static_cast<const ModuleExport *>(cresult.value.module);
+            std::optional<Handle> handle =
+                    cresult.value.handle ? std::optional<Handle>{cresult.value.handle} : std::nullopt;
+            const Export *module_ptr = reinterpret_cast<const Export *>(cresult.value.module);
             return ResolvedModule{handle, *module_ptr};
         }
-        auto pollModuleFuture(Slice<const char> module) const noexcept -> decltype(auto) {
-            struct Future {
-                ModuleLoader loader;
-                Slice<const char> module;
-                using ResultType = std::expected<ResolvedModule, Result>;
-                PollResult<ResultType> poll(TaskWaker waker) const noexcept {
-                    return this->loader.pollModule(waker, this->module);
-                }
-            };
-            return Future{.loader = *this, .module = module};
+        Status Loader::addModule(Instance owner, const Export &module) const noexcept {
+            return static_cast<Status>(fstd_module_loader_add_module(
+                    this->handle, owner, reinterpret_cast<const FSTD_ModuleExport *>(&module)));
         }
-        Status addModule(ModuleInstance owner, const ModuleExport &module) const noexcept {
-            return static_cast<Status>(fstd_module_loader_add_module(this->handle, owner, &module));
-        }
-        Status addModulesFromPath(Path path, auto &&filter) const noexcept {
+        Status Loader::addModulesFromPath(Path path, auto &&filter) const noexcept {
             using F = decltype(filter);
             auto wrapper = +[](void *data, const FSTD_ModuleExport *module) {
                 F &&filter = static_cast<F &&>(*static_cast<std::remove_cvref_t<F> *>(data));
                 auto request = std::invoke_r<FilterRequest>(std::forward<F>(filter),
-                                                            *static_cast<const ModuleExport *>(module));
+                                                            *reinterpret_cast<const Export *>(module));
                 return static_cast<FSTD_ModuleLoaderFilterRequest>(request);
             };
             return static_cast<Status>(fstd_module_loader_add_modules_from_path(this->handle, path, &filter, wrapper));
         }
-        Status addModulesFromIter(auto &&filter) const noexcept {
+        Status Loader::addModulesFromIter(auto &&filter) const noexcept {
             using F = decltype(filter);
             auto wrapper = +[](void *data, const FSTD_ModuleExport *module) {
                 F &&filter = static_cast<F &&>(*static_cast<std::remove_cvref_t<F> *>(data));
                 auto request = std::invoke_r<FilterRequest>(std::forward<F>(filter),
-                                                            *static_cast<const ModuleExport *>(module));
+                                                            *reinterpret_cast<const Export *>(module));
                 return static_cast<FSTD_ModuleLoaderFilterRequest>(request);
             };
             return static_cast<Status>(fstd_module_loader_add_modules_from_iter(this->handle, &filter, wrapper));
         }
-        OpaqueFuture<Result> commit() const noexcept {
-            return std::bit_cast<OpaqueFuture<Result>>(fstd_module_loader_commit(this->handle));
-        }
-    };
 
-    struct Modules {
         // NOLINTNEXTLINE(performance-enum-size)
         enum class Profile : FSTD_ModulesProfile {
             Default = FSTD_ModulesProfile_Default,
@@ -5914,12 +6898,14 @@ namespace fstd {
 
         // NOLINTNEXTLINE(performance-enum-size)
         enum class FeatureTag : FSTD_ModulesFeatureTag {};
+
         // NOLINTNEXTLINE(performance-enum-size)
         enum class FeatureRequestFlag : FSTD_ModulesFeatureRequestFlag {
             Required = FSTD_ModulesFeatureRequestFlag_Required,
             On = FSTD_ModulesFeatureRequestFlag_On,
             Off = FSTD_ModulesFeatureRequestFlag_Off,
         };
+
         struct FeatureRequest : FSTD_ModulesFeatureRequest {
             using Type = FeatureRequest;
             using FStd = FSTD_ModulesFeatureRequest;
@@ -5940,6 +6926,7 @@ namespace fstd {
             On = FSTD_ModulesFeatureStatusFlag_On,
             Off = FSTD_ModulesFeatureStatusFlag_Off,
         };
+
         struct FeatureStatus : FSTD_ModulesFeatureStatus {
             using Type = FeatureStatus;
             using FStd = FSTD_ModulesFeatureStatus;
@@ -5958,12 +6945,7 @@ namespace fstd {
         struct Cfg : FSTD_ModulesCfg {
             using Type = Cfg;
             using FStd = FSTD_ModulesCfg;
-            constexpr Cfg() noexcept :
-                FSTD_ModulesCfg{
-                        .id = {.id = static_cast<FSTD_CfgId>(CfgId::Modules)},
-                        .profile = static_cast<FSTD_ModulesProfile>(DefaultProfile),
-                        .features = {},
-                } {};
+            constexpr Cfg() noexcept : Cfg(DefaultProfile, {}) {};
             constexpr Cfg(Profile profile, Slice<const FeatureRequest> features) noexcept :
                 FSTD_ModulesCfg{
                         .id = {.id = static_cast<FSTD_CfgId>(CfgId::Modules)},
@@ -5977,37 +6959,38 @@ namespace fstd {
             constexpr Cfg &operator=(Cfg &&other) noexcept = default;
         };
 
-        static Profile profile() noexcept { return static_cast<Profile>(fstd_modules_profile()); }
-        static Slice<const FeatureStatus> features() noexcept {
+        inline static Profile profile() noexcept { return static_cast<Profile>(fstd_modules_profile()); }
+        inline static Slice<const FeatureStatus> features() noexcept {
             auto features = fstd_modules_features();
             return {static_cast<const FeatureStatus *>(features.ptr), features.len};
         }
-        static bool nsExists(Slice<const char> ns) noexcept { return fstd_modules_namespace_exists(ns); }
-        static Status pruneInstances() noexcept { return static_cast<Status>(fstd_modules_prune_instances()); }
-        static std::expected<ModuleParamInfo, Status> queryParameter(Slice<const char> module,
-                                                                     Slice<const char> parameter) noexcept {
-            ModuleParamInfo info{};
+        inline static bool nsExists(StrConst ns) noexcept { return fstd_modules_namespace_exists(ns); }
+        inline static Status pruneInstances() noexcept { return static_cast<Status>(fstd_modules_prune_instances()); }
+        inline static std::expected<ParamInfo, Status> queryParameter(StrConst module, StrConst parameter) noexcept {
+            ParamInfo info{};
             Status status = static_cast<Status>(fstd_modules_query_parameter(module, parameter, &info));
             if (status != Status::Ok)
                 return std::unexpected(status);
             return info;
         }
         template<typename T>
-        std::expected<T, Status> readParameter(Slice<const char> module, Slice<const char> parameter) const noexcept {
+        inline static std::expected<T, Status> readParameter(StrConst module, StrConst parameter) noexcept {
             T value;
-            ModuleParamTag tag = ModuleParamUtil<T>::ParamTag;
-            Status status = static_cast<Status>(fstd_modules_read_parameter_opaque(tag, module, parameter, &value));
+            ParamTag tag = ParamUtil<T>::ParamTag;
+            Status status = static_cast<Status>(fstd_modules_read_parameter_opaque(
+                    static_cast<FSTD_ModuleParamTag>(tag), module, parameter, &value));
             if (status != Status::Ok)
                 return std::unexpected(status);
             return value;
         }
         template<typename T>
-        Status writeParameter(Slice<const char> module, Slice<const char> parameter, const T value) const noexcept {
-            ModuleParamTag tag = ModuleParamUtil<T>::ParamTag;
-            Status status = static_cast<Status>(fstd_modules_write_parameter_opaque(tag, module, parameter, &value));
+        inline static Status writeParameter(StrConst module, StrConst parameter, const T &value) noexcept {
+            ParamTag tag = ParamUtil<T>::ParamTag;
+            Status status = static_cast<Status>(fstd_modules_write_parameter_opaque(
+                    static_cast<FSTD_ModuleParamTag>(tag), module, parameter, &value));
             return status;
         }
-    };
+    } // namespace modules
 
 } // namespace fstd
 #endif
