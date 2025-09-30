@@ -4354,8 +4354,9 @@ namespace fstd {
         static Result initPlatformError(PlatformError err) noexcept {
             return initPlatformError(static_cast<FSTD_PlatformError>(err));
         }
+        // TODO(gabriel, https://github.com/llvm/llvm-project/issues/82994): Replace with consteval.
         template<detail::ConstString String>
-        static consteval Result initStaticStr() noexcept {
+        static constexpr Result initStaticStr() noexcept {
             constexpr static StrConst StringSlice = String.str;
             constexpr static FSTD_ResultVtable VTable = {
                     .cls = {},
@@ -6351,9 +6352,6 @@ namespace fstd {
             constexpr SymbolExport &operator=(const SymbolExport &other) noexcept = default;
             constexpr SymbolExport &operator=(SymbolExport &&other) noexcept = default;
 
-            template<typename Parent>
-            consteval void assertParent() {}
-
             SymbolIdExt<T> symbol;
             SymbolType type;
             SymbolLinkage linkage;
@@ -6559,14 +6557,14 @@ namespace fstd {
             }
         };
 
-#ifdef FSTD_PLATFORM_WINDOWS
-#define FSTD_CXX_EXPORT_MODULE(Info)                                                                                   \
+#if defined(FSTD_PLATFORM_WINDOWS) && !defined(FSTD_COMPILER_CLANG)
+#define FSTD_CXX_EXPORT_MODULE(ModuleInfo)                                                                             \
     __declspec(allocate(FSTD__MODULE_SECTION)) constinit const ::fstd::modules::Export *FSTD_IDENT(                    \
-            fstd__cxx_module_export_) = &decltype(Info)::moduleExport();
+            fstd__cxx_module_export_) = &ModuleInfo.moduleExport();
 #else
-#define FSTD_CXX_EXPORT_MODULE(info)                                                                                   \
+#define FSTD_CXX_EXPORT_MODULE(ModuleInfo)                                                                             \
     constexpr static const ::fstd::modules::Export *FSTD_IDENT(fstd__cxx_module_export_)                               \
-            __attribute__((retain, used, section(FSTD__MODULE_SECTION))) = &decltype(Info)::moduleExport();
+            __attribute__((retain, used, section(FSTD__MODULE_SECTION))) = &ModuleInfo.moduleExport();
 #endif
 
         struct Export {
@@ -6608,8 +6606,9 @@ namespace fstd {
             void (*on_event)(const FSTD_ModuleExport *module, FSTD_ModuleExportEventTag *tag);
         };
 
+        // TODO(gabriel, https://github.com/llvm/llvm-project/issues/82994): Replace with consteval.
         template<typename T>
-        static consteval auto makeModule() {
+        static constexpr auto makeModule() {
             constexpr static StrConst Name = T::Name;
             constexpr static StrConst Description = []() -> StrConst {
                 if constexpr (requires { T::Description; }) {
