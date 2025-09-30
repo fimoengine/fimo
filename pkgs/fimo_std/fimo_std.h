@@ -616,18 +616,18 @@ fstd_util void fstd__ref_counted_handle_unregister(FSTD__RefCountedHandle *ref) 
 // memory ----------------------------------
 // -----------------------------------------
 
-typedef FSTD_Slice(FSTD_U8) FSTD_MemortSlice;
+typedef FSTD_Slice(FSTD_U8) FSTD_MemorySlice;
 
 typedef struct {
     /// Allocates a new buffer.
     void *FSTD_MAYBE_NULL (*alloc)(void *FSTD_MAYBE_NULL data, FSTD_USize len, FSTD_USize align);
     /// Tries to resize the buffer in place.
-    bool (*resize)(void *FSTD_MAYBE_NULL data, FSTD_MemortSlice memory, FSTD_USize align, FSTD_USize new_len);
+    bool (*resize)(void *FSTD_MAYBE_NULL data, FSTD_MemorySlice memory, FSTD_USize align, FSTD_USize new_len);
     /// Resizes the buffer, allowing relocation.
-    void *FSTD_MAYBE_NULL (*remap)(void *FSTD_MAYBE_NULL data, FSTD_MemortSlice memory, FSTD_USize align,
+    void *FSTD_MAYBE_NULL (*remap)(void *FSTD_MAYBE_NULL data, FSTD_MemorySlice memory, FSTD_USize align,
                                    FSTD_USize new_len);
     /// Frees a previously allocated buffer.
-    void (*free)(void *FSTD_MAYBE_NULL data, FSTD_MemortSlice memory, FSTD_USize align);
+    void (*free)(void *FSTD_MAYBE_NULL data, FSTD_MemorySlice memory, FSTD_USize align);
 } FSTD_AllocatorVtable;
 
 /// General purpose allocator api.
@@ -649,7 +649,7 @@ FSTD_ALLOC fstd_util void *FSTD_MAYBE_NULL fstd__allocator_alloc(FSTD_Allocator 
     fstd__allocator_resize((alloc), (ptr), sizeof(*ptr) * (n), fstd__alignof(*ptr), sizeof(*ptr) * (new_n))
 fstd_util bool fstd__allocator_resize(FSTD_Allocator alloc, void *ptr, FSTD_USize len, FSTD_USize align,
                                       FSTD_USize new_len) {
-    FSTD_MemortSlice memory = {.ptr = (FSTD_U8 *)ptr, .len = len};
+    FSTD_MemorySlice memory = {.ptr = (FSTD_U8 *)ptr, .len = len};
     return alloc.vtable->resize(alloc.ptr, memory, align, new_len);
 }
 
@@ -657,13 +657,13 @@ fstd_util bool fstd__allocator_resize(FSTD_Allocator alloc, void *ptr, FSTD_USiz
     (type *)fstd__allocator_remap((alloc), (ptr), sizeof(*ptr) * (n), fstd__alignof(*ptr), sizeof(*ptr) * (new_n))
 FSTD_ALLOC fstd_util void *FSTD_MAYBE_NULL fstd__allocator_remap(FSTD_Allocator alloc, void *ptr, FSTD_USize len,
                                                                  FSTD_USize align, FSTD_USize new_len) {
-    FSTD_MemortSlice memory = {.ptr = (FSTD_U8 *)ptr, .len = len};
+    FSTD_MemorySlice memory = {.ptr = (FSTD_U8 *)ptr, .len = len};
     return alloc.vtable->remap(alloc.ptr, memory, align, new_len);
 }
 
 #define fstd_allocator_free(alloc, ptr, n) fstd__allocator_free((alloc), (ptr), sizeof(*ptr) * (n), fstd__alignof(*ptr))
 fstd_util void fstd__allocator_free(FSTD_Allocator alloc, void *ptr, FSTD_USize len, FSTD_USize align) {
-    FSTD_MemortSlice memory = {.ptr = (FSTD_U8 *)ptr, .len = len};
+    FSTD_MemorySlice memory = {.ptr = (FSTD_U8 *)ptr, .len = len};
     alloc.vtable->free(alloc.ptr, memory, align);
 }
 
@@ -672,17 +672,17 @@ FSTD_ALLOC fstd_util void *FSTD_MAYBE_NULL fstd__allocator_null_alloc(void *FSTD
     FSTD_UNUSED(arg0, arg1, arg2);
     return fstd_nullptr;
 }
-fstd_util bool fstd__allocator_null_resize(void *FSTD_MAYBE_NULL arg0, FSTD_MemortSlice arg1, FSTD_USize arg2,
+fstd_util bool fstd__allocator_null_resize(void *FSTD_MAYBE_NULL arg0, FSTD_MemorySlice arg1, FSTD_USize arg2,
                                            FSTD_USize arg3) {
     FSTD_UNUSED(arg0, arg1, arg2, arg3);
     return false;
 }
-FSTD_ALLOC fstd_util FSTD_MAYBE_NULL void *fstd__allocator_null_remap(void *FSTD_MAYBE_NULL arg0, FSTD_MemortSlice arg1,
+FSTD_ALLOC fstd_util FSTD_MAYBE_NULL void *fstd__allocator_null_remap(void *FSTD_MAYBE_NULL arg0, FSTD_MemorySlice arg1,
                                                                       FSTD_USize arg2, FSTD_USize arg3) {
     FSTD_UNUSED(arg0, arg1, arg2, arg3);
     return fstd_nullptr;
 }
-fstd_util void fstd__allocator_null_free(void *FSTD_MAYBE_NULL arg0, FSTD_MemortSlice arg1, FSTD_USize arg2) {
+fstd_util void fstd__allocator_null_free(void *FSTD_MAYBE_NULL arg0, FSTD_MemorySlice arg1, FSTD_USize arg2) {
     FSTD_UNUSED(arg0, arg1, arg2);
 }
 
@@ -855,6 +855,43 @@ fstd_util void fstd__arena_free(FSTD_Arena *arena, void *ptr, FSTD_USize len) {
     fstd_dbg_assert(end_pos <= atomic_load_explicit(&arena->pos, memory_order_relaxed));
     atomic_compare_exchange_strong_explicit(&arena->pos, &end_pos, start_pos, memory_order_relaxed,
                                             memory_order_relaxed);
+}
+
+fstd_util void *FSTD_MAYBE_NULL fstd__arena_allocator_alloc(void *FSTD_MAYBE_NULL data, FSTD_USize len,
+                                                            FSTD_USize align) {
+    FSTD_Arena *arena = (FSTD_Arena *)data;
+    return fstd__arena_push(arena, len, align);
+}
+fstd_util bool fstd__arena_allocator_resize(void *FSTD_MAYBE_NULL data, FSTD_MemorySlice memory, FSTD_USize align,
+                                            FSTD_USize new_len) {
+    FSTD_UNUSED(align);
+    FSTD_Arena *arena = (FSTD_Arena *)data;
+    return fstd__arena_resize(arena, memory.ptr, memory.len, new_len);
+}
+fstd_util void *FSTD_MAYBE_NULL fstd__arena_allocator_remap(void *FSTD_MAYBE_NULL data, FSTD_MemorySlice memory,
+                                                            FSTD_USize align, FSTD_USize new_len) {
+    FSTD_Arena *arena = (FSTD_Arena *)data;
+    return fstd__arena_remap(arena, memory.ptr, memory.len, align, new_len);
+}
+fstd_util void fstd__arena_allocator_free(void *FSTD_MAYBE_NULL data, FSTD_MemorySlice memory, FSTD_USize align) {
+    FSTD_UNUSED(align);
+    FSTD_Arena *arena = (FSTD_Arena *)data;
+    return fstd__arena_free(arena, memory.ptr, memory.len);
+}
+fstd_internal FSTD_CONSTEXPR FSTD_AllocatorVtable FSTD__Arena_AllocatorVtable = {
+        .alloc = fstd__arena_allocator_alloc,
+        .resize = fstd__arena_allocator_resize,
+        .remap = fstd__arena_allocator_remap,
+        .free = fstd__arena_allocator_free,
+};
+
+/// Wraps the arena in an allocator interface.
+fstd_util FSTD_Allocator fstd_arena_get_allocator(FSTD_Arena *arena) {
+    FSTD_Allocator allocator = {
+            .ptr = arena,
+            .vtable = &FSTD__Arena_AllocatorVtable,
+    };
+    return allocator;
 }
 
 /// Fetches the current position of the arena.
@@ -4320,6 +4357,7 @@ namespace fstd {
             return fstd__arena_free(this, ptr, sizeof(T) * n);
         }
 
+        Allocator getAllocator() noexcept { return fstd_arena_get_allocator(this); }
         usize getPos() noexcept { return fstd_arena_get_pos(this); }
         void setPos(usize pos) noexcept { return fstd_arena_set_pos(this, pos); }
     };
@@ -6442,7 +6480,7 @@ namespace fstd {
             }
 
             template<typename... Us>
-            constexpr SymbolImportList<Ts..., Us...> with(const SymbolImportList<Us...> &other) noexcept {
+            constexpr SymbolImportList<Ts..., Us...> with(const SymbolImportList<Us...> &other) const noexcept {
                 std::array<FSTD_ModuleSymbolExt, sizeof...(Ts) + sizeof...(Us)> arr{};
                 for (usize i = 0; i < NumImports; i++) {
                     arr[i] = this->arr[i];
@@ -6453,7 +6491,7 @@ namespace fstd {
                 return {arr};
             }
             template<typename T>
-            constexpr SymbolImportList<Ts..., T> with(const SymbolIdExt<T> &sym) noexcept {
+            constexpr SymbolImportList<Ts..., T> with(const SymbolIdExt<T> &sym) const noexcept {
                 std::array<FSTD_ModuleSymbolExt, sizeof...(Ts) + 1> imports{};
                 for (usize i = 0; i < NumImports; i++) {
                     imports[i] = this->arr[i];
@@ -6462,7 +6500,7 @@ namespace fstd {
                 return {imports};
             }
             template<typename T, typename Unique>
-            constexpr SymbolImportList<Ts..., T> with(const Symbol<T, Unique> &sym) noexcept {
+            constexpr SymbolImportList<Ts..., T> with(const Symbol<T, Unique> &sym) const noexcept {
                 return this->with(static_cast<SymbolIdExt<T>>(sym));
             }
         };
