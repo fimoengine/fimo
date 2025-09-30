@@ -30,6 +30,42 @@ const module_list: []const struct {
     .{ .name = "fimo_worlds", .dep_name = "module/fimo_worlds", .pub_name = "mod-worlds" },
 };
 
+const InstallMode = enum {
+    std,
+    modules_merged,
+    modules_split,
+    tools,
+    full,
+
+    fn installStd(self: InstallMode) bool {
+        return switch (self) {
+            .modules_merged, .modules_split, .tools => false,
+            .std, .full => true,
+        };
+    }
+
+    fn installMergedModules(self: InstallMode) bool {
+        return switch (self) {
+            .std, .modules_split, .tools => false,
+            .modules_merged, .full => true,
+        };
+    }
+
+    fn installStandaloneModules(self: InstallMode) bool {
+        return switch (self) {
+            .std, .modules_merged, .tools => false,
+            .modules_split, .full => true,
+        };
+    }
+
+    fn installTools(self: InstallMode) bool {
+        return switch (self) {
+            .std, .modules_merged, .modules_split => false,
+            .tools, .full => true,
+        };
+    }
+};
+
 pub fn build(b: *std.Build) void {
     const install_step = b.getInstallStep();
     const test_step = b.step("test", "Run tests");
@@ -43,11 +79,13 @@ pub fn build(b: *std.Build) void {
         "Link mode of the modules (default: static)",
     ) orelse .static;
 
+    const install_mode = b.option(InstallMode, "install-mode", "Predefined set of targets to install (default: modules_merged)") orelse InstallMode.modules_merged;
     const install_headers = b.option(bool, "headers", "Install all headers (default: no)") orelse false;
     const install_tests = b.option(bool, "tests", "Install all tests (default: no)") orelse false;
-
-    const install_standalone = b.option(bool, "standalone-module", "Enable standalone binary (default: yes)") orelse true;
-    const install_split = b.option(bool, "split-modules", "Enable split module binaries (default: no)") orelse false;
+    const install_std = b.option(bool, "install-std", "Install the std library") orelse install_mode.installStd();
+    const install_merged_modules = b.option(bool, "install-merged-modules", "Install merged binary") orelse install_mode.installMergedModules();
+    const install_standalone_modules = b.option(bool, "install-standalone-modules", "Install standalone module binaries") orelse install_mode.installStandaloneModules();
+    const install_tools = b.option(bool, "install-tools", "Install tools") orelse install_mode.installTools();
 
     const test_filter = b.option([]const u8, "test-filter", "Filter the test execution to one specific package or module (default: none)");
 
@@ -101,7 +139,7 @@ pub fn build(b: *std.Build) void {
             }
         }
 
-        b.installArtifact(exe.getArtifact());
+        if (install_tools) b.installArtifact(exe.getArtifact());
         const run_step = b.step(exe.name, b.fmt("Run {s} executable", .{exe.name}));
         const run_artifact = exe.getRunArtifact();
         if (b.args) |args| run_artifact.addArgs(args);
@@ -131,10 +169,7 @@ pub fn build(b: *std.Build) void {
             }
         }
 
-        if (install_headers) {
-            if (pkg.addInstallHeadersEx(b)) |inst| install_step.dependOn(&inst.step);
-        }
-
+        if (install_headers) if (pkg.addInstallHeadersEx(b)) |inst| install_step.dependOn(&inst.step);
         const check_target = b.addLibrary(.{
             .linkage = .static,
             .name = b.fmt("pkg_{s}_check", .{pkg.name}),
@@ -166,7 +201,7 @@ pub fn build(b: *std.Build) void {
         });
         check_step.dependOn(&check_target.step);
 
-        if (install_split) {
+        if (install_standalone_modules) {
             switch (linkage) {
                 .static => b.installArtifact(mod.getStaticLib()),
                 .dynamic => installModule(b, mod),
@@ -186,11 +221,23 @@ pub fn build(b: *std.Build) void {
     });
     check_step.dependOn(&fimo_check.step);
 
-    if (install_standalone) {
+    if (install_merged_modules) {
         switch (linkage) {
             .static => b.installArtifact(fimo_module.getStaticLib()),
             .dynamic => installModule(b, fimo_module),
         }
+    }
+
+    if (install_std) {
+        const fimo_std_pkg = builder.builder.getPackage("fimo_std");
+        const fimo_std = b.addLibrary(.{
+            .linkage = linkage,
+            .name = "fimo_std",
+            .root_module = fimo_std_pkg.root_module,
+            .use_llvm = if (target.result.os.tag == .linux) true else null,
+        });
+        fimo_std.bundle_compiler_rt = true;
+        b.installArtifact(fimo_std);
     }
 }
 
