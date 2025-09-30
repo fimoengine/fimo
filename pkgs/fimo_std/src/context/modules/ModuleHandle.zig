@@ -153,25 +153,31 @@ pub fn initPath(allocator: Allocator, p: Path) ModuleHandleError!*Self {
     const cwd = std.fs.cwd().realpathAlloc(allocator, ".") catch return error.InvalidPath;
     defer allocator.free(cwd);
     try module_path.pushString(allocator, cwd);
+    try module_path.pushPath(allocator, p);
 
-    const stat = std.fs.cwd().statFile(p.raw) catch return error.InvalidPath;
-    switch (stat.kind) {
-        .file => try module_path.pushPath(allocator, p),
-        .directory => {
-            const default_module_name = Path.init("module.fimo_module") catch unreachable;
-            try module_path.pushPath(allocator, default_module_name);
-        },
-        .sym_link => {
-            const link_buffer = try allocator.alloc(u8, std.fs.max_path_bytes);
-            defer allocator.free(link_buffer);
-            const resolved = std.fs.cwd().readLink(
-                p.raw,
-                link_buffer,
-            ) catch return error.InvalidPath;
-            const res_p = Path.init(resolved) catch return error.InvalidPath;
-            return Self.initPath(allocator, res_p);
-        },
-        else => return error.InvalidPath,
+    if (std.fs.cwd().statFile(module_path.asPath().raw)) |stat| {
+        switch (stat.kind) {
+            .file => {},
+            .sym_link => {
+                const link_buffer = try allocator.alloc(u8, std.fs.max_path_bytes);
+                defer allocator.free(link_buffer);
+                const resolved = std.fs.cwd().readLink(
+                    p.raw,
+                    link_buffer,
+                ) catch return error.InvalidPath;
+                const res_p = Path.init(resolved) catch return error.InvalidPath;
+                return Self.initPath(allocator, res_p);
+            },
+            else => return error.InvalidPath,
+        }
+    } else |err| {
+        switch (err) {
+            error.IsDir => {
+                const default_module_name = Path.init("module.fimo_module") catch unreachable;
+                try module_path.pushPath(allocator, default_module_name);
+            },
+            else => return error.InvalidPath,
+        }
     }
     const module_dir = module_path.asPath().parent() orelse return error.InvalidPath;
 

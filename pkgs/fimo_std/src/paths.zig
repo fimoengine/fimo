@@ -1156,6 +1156,7 @@ const ffi = struct {
 
     export fn fstd_path_buf_push_alloc(buffer: *compat.PathBuffer, alloc: Alloc, path: compat.Path) AnyResult {
         var b = PathBuffer.initC(buffer.*);
+        defer buffer.* = b.intoC();
         const p = Path.initC(path);
         b.pushPath(alloc.adaptIntoStdAllocator(), p) catch |err|
             return AnyError.initError(err).intoResult();
@@ -1164,6 +1165,7 @@ const ffi = struct {
 
     export fn fstd_path_buf_push_str_alloc(buffer: *compat.PathBuffer, alloc: Alloc, path: Slice(u8)) AnyResult {
         var b = PathBuffer.initC(buffer.*);
+        defer buffer.* = b.intoC();
         const p = path.intoSliceOrEmpty();
         b.pushString(alloc.adaptIntoStdAllocator(), p) catch |err|
             return AnyError.initError(err).intoResult();
@@ -1172,6 +1174,7 @@ const ffi = struct {
 
     export fn fstd_path_buf_pop(buffer: *compat.PathBuffer) bool {
         var b = PathBuffer.initC(buffer.*);
+        defer buffer.* = b.intoC();
         return b.pop();
     }
 
