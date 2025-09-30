@@ -606,7 +606,7 @@ fstd_util void fstd__ref_counted_handle_unregister(FSTD__RefCountedHandle *ref) 
     fstd_dbg_assert(count > 0);
     fstd_dbg_assert(ref->handle != fstd_nullptr);
     ref->count -= 1;
-    if (ref->count == 0)
+    if (count == 1)
         ref->handle = fstd_nullptr;
 
     atomic_fetch_and_explicit(&ref->count, ~locked, memory_order_release);
@@ -4243,15 +4243,17 @@ namespace fstd {
         }
         template<typename T>
         bool resize(T *ptr, usize n, usize new_n) const noexcept {
-            return this->vtable->resize(ptr, sizeof(T) * n, alignof(T), sizeof(T) * new_n);
+            return this->vtable->resize(this->ptr, {.ptr = (u8 *)ptr, .len = sizeof(T) * n}, alignof(T),
+                                        sizeof(T) * new_n);
         }
         template<typename T>
         FSTD_ALLOC T *FSTD_MAYBE_NULL remap(T *ptr, usize n, usize new_n) const noexcept {
-            return this->vtable->remap(ptr, sizeof(T) * n, alignof(T), sizeof(T) * new_n);
+            return static_cast<T *>(this->vtable->remap(this->ptr, {.ptr = (u8 *)ptr, .len = sizeof(T) * n}, alignof(T),
+                                                        sizeof(T) * new_n));
         }
         template<typename T>
         void free(T *ptr, usize n) const noexcept {
-            return this->vtable->free(ptr, sizeof(T) * n, alignof(T));
+            return this->vtable->free(this->ptr, {.ptr = (u8 *)ptr, .len = sizeof(T) * n}, alignof(T));
         }
         template<typename T>
         FSTD_ALLOC T *FSTD_MAYBE_NULL create() const noexcept {
