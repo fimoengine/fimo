@@ -4034,8 +4034,10 @@ namespace fstd {
 
     using Uuid = FSTD_Uuid;
 
-    template<auto Value>
-    struct ConstexprValue {};
+    template<auto Value_>
+    struct ConstexprValue {
+        constexpr static auto Value = Value_;
+    };
 
     namespace detail {
         template<auto>
@@ -4134,48 +4136,9 @@ namespace fstd {
                 fmt(fmt), loc(loc){};
         };
 
-        static constexpr int maximum(int a, int b) {
-            if (a > b)
-                return a;
-            return b;
-        }
-        template<int index, typename A = void, typename... Args>
-        struct ArgType {
-            using type = typename std::conditional<index == 0, A,
-                                                   typename ArgType<maximum(index - 1, 0), Args...>::type>::type;
-        };
-
-        template<typename T>
-        struct ArgType<0, T> {
-            using type = T;
-        };
-
-        template<typename... Args>
-        struct Tuple {
-            struct MembersEnd {};
-
-            template<usize index, typename M = MembersEnd, typename... Membs>
-            struct TupleMembers {
-                M member;
-                typename std::conditional<sizeof...(Membs) == 0, MembersEnd, TupleMembers<index + 1, Membs...>>::type
-                        nextMember;
-                static constexpr usize getIndex() { return index; };
-            };
-            TupleMembers<0, Args...> members;
-
-            template<usize index, typename Ret, typename T>
-            constexpr Ret &getMemberFromHolder(T &holder) {
-                if constexpr (T::getIndex() == index)
-                    return holder.member;
-                else
-                    return getMemberFromHolder<index, Ret>(holder.nextMember);
-            };
-
-            template<usize index>
-            constexpr ArgType<index, Args...>::type &getMember() {
-                return getMemberFromHolder<index, typename ArgType<index, Args...>::type>(members);
-            }
-        };
+        // -----------------------------------------
+        // Void slice ------------------------------
+        // -----------------------------------------
 
         struct ConstUnknownSlice {
             void const *ptr;
@@ -4222,6 +4185,719 @@ namespace fstd {
         value_ptr -= offset;
         return reinterpret_cast<U const *>(value_ptr);
     }
+
+    // -----------------------------------------
+    // Tuple -----------------------------------
+    // -----------------------------------------
+
+    namespace tuple_detail {
+        template<typename T>
+        struct IsTuple : ConstexprValue<false> {};
+
+        template<typename Head, typename... Rest>
+        struct FirstIsNotTuple : ConstexprValue<!IsTuple<Head>::Value> {};
+
+        template<typename... Ts>
+        struct IsEqualityComparable;
+
+        template<typename T, typename U>
+                struct IsEqualityComparable<T, U> : ConstexprValue < requires(const T &t, const U &u) {
+            {!(t == u)}->std::convertible_to<bool>;
+        }>{};
+
+        template<typename T>
+        struct IsEqualityComparable<T> : ConstexprValue<false> {};
+
+        template<>
+        struct IsEqualityComparable<> : ConstexprValue<true> {};
+
+        template<typename... Ts>
+        struct HasOrder;
+
+        template<typename T, typename U>
+                struct HasOrder<T, U> : ConstexprValue < requires(const T &t, const U &u) {
+            {!(t < u)}->std::convertible_to<bool>;
+            {!(u < t)}->std::convertible_to<bool>;
+        }>{};
+
+        template<typename T>
+        struct HasOrder<T> : ConstexprValue<false> {};
+
+        template<>
+        struct HasOrder<> : ConstexprValue<true> {};
+
+        constexpr auto three_way = []<class T, class U>(const T &t, const U &u)
+            requires HasOrder<T, U>::Value
+        {
+            if constexpr (std::three_way_comparable_with<T, U>)
+                return t <=> u;
+            else {
+                if (t < u)
+                    return std::weak_ordering::less;
+                if (u < t)
+                    return std::weak_ordering::greater;
+                return std::weak_ordering::equivalent;
+            }
+        };
+
+        template<usize Index, typename... Ts>
+        struct TupleMember;
+
+        template<usize Index, typename T, typename... Rest>
+        struct TupleMember<Index, T, Rest...> : ConstexprValue<Index> {
+            T member;
+            TupleMember<Index + 1, Rest...> next;
+
+            constexpr TupleMember() noexcept(std::conjunction_v<std::is_nothrow_default_constructible<T>,
+                                                                std::is_nothrow_default_constructible<Rest>...>)
+                requires(std::conjunction_v<std::is_default_constructible<T>, std::is_default_constructible<Rest>...>)
+            = default;
+
+            constexpr TupleMember(const T &member, const Rest &...args) noexcept(
+                    std::conjunction_v<std::is_nothrow_copy_constructible<T>,
+                                       std::is_nothrow_copy_constructible<Rest>...>)
+                requires(std::conjunction_v<std::is_copy_constructible<T>, std::is_copy_constructible<Rest>...>)
+                : member(member), next(args...) {}
+
+            template<typename U, typename... URest>
+            constexpr TupleMember(U &&member, URest &&...args) noexcept(
+                    std::conjunction_v<std::is_nothrow_constructible<T, U>,
+                                       std::is_nothrow_constructible<Rest, URest>...>)
+                requires(std::conjunction_v<std::is_constructible<T, U>, std::is_constructible<Rest, URest>...>)
+                : member(std::forward<U>(member)), next(std::forward<URest>(args)...) {}
+
+            template<usize I, typename U, typename... URest, URest...>
+            constexpr TupleMember(TupleMember<I, U, URest...> &other) noexcept(
+                    std::conjunction_v<std::is_nothrow_constructible<T, U &>,
+                                       std::is_nothrow_constructible<Rest, URest &>...>)
+                requires(std::conjunction_v<std::is_constructible<T, U &>, std::is_constructible<Rest, URest &>...>)
+                : member(other.member), next(other.next) {}
+
+            template<usize I, typename U, typename... URest, URest...>
+            constexpr TupleMember(const TupleMember<I, U, URest...> &other) noexcept(
+                    std::conjunction_v<std::is_nothrow_constructible<T, const U &>,
+                                       std::is_nothrow_constructible<Rest, const URest &>...>)
+                requires(std::conjunction_v<std::is_constructible<T, const U &>,
+                                            std::is_constructible<Rest, const URest &>...>)
+                : member(other.member), next(other.next) {}
+
+            template<usize I, typename U, typename... URest, URest...>
+            constexpr TupleMember(TupleMember<I, U, URest...> &&other) noexcept(
+                    std::conjunction_v<std::is_nothrow_constructible<T, U &&>,
+                                       std::is_nothrow_constructible<Rest, URest &&>...>)
+                requires(std::conjunction_v<std::is_constructible<T, U &&>, std::is_constructible<Rest, URest &&>...>)
+                : member(std::move(other.member)), next(std::move(other.next)) {}
+
+            template<usize I, typename U, typename... URest>
+            constexpr TupleMember(const TupleMember<I, U, URest...> &&other) noexcept(
+                    std::conjunction_v<std::is_nothrow_constructible<T, const U &&>,
+                                       std::is_nothrow_constructible<Rest, const URest &&>...>)
+                requires(std::conjunction_v<std::is_constructible<T, const U &&>,
+                                            std::is_constructible<Rest, const URest &&>...>)
+                : member(std::move(other.member)), next(std::move(other.next)) {}
+
+            constexpr TupleMember(const TupleMember &other) noexcept(
+                    std::conjunction_v<std::is_nothrow_copy_constructible<T>,
+                                       std::is_nothrow_copy_constructible<Rest>...>) = default;
+
+            constexpr TupleMember(TupleMember &&other) noexcept(
+                    std::conjunction_v<std::is_nothrow_move_constructible<T>,
+                                       std::is_nothrow_move_constructible<Rest>...>) = default;
+
+            constexpr TupleMember &operator=(const TupleMember &other) noexcept(
+                    std::conjunction_v<std::is_nothrow_copy_assignable<T>, std::is_nothrow_copy_assignable<Rest>...>)
+                requires(std::conjunction_v<std::is_copy_assignable<T>, std::is_copy_assignable<Rest>...>)
+            {
+                this->member = other.member;
+                this->next = other.next;
+                return *this;
+            }
+
+            constexpr const TupleMember &operator=(const TupleMember &other) const
+                    noexcept(std::conjunction_v<std::is_nothrow_copy_assignable<const T>,
+                                                std::is_nothrow_copy_assignable<const Rest>...>)
+                requires(std::conjunction_v<std::is_copy_assignable<const T>, std::is_copy_assignable<const Rest>...>)
+            {
+                this->member = other.member;
+                this->next = other.next;
+                return *this;
+            }
+
+            constexpr TupleMember &operator=(TupleMember &&other) noexcept(
+                    std::conjunction_v<std::is_nothrow_move_assignable<T>, std::is_nothrow_move_assignable<Rest>...>)
+                requires(std::conjunction_v<std::is_move_assignable<T>, std::is_move_assignable<Rest>...>)
+            {
+                this->member = std::forward<T>(other.member);
+                this->next = std::move(other.next);
+                return *this;
+            }
+
+            constexpr const TupleMember &operator=(TupleMember &&other) const
+                    noexcept(std::conjunction_v<std::is_nothrow_assignable<const T &, T>,
+                                                std::is_nothrow_assignable<const Rest &, Rest>...>)
+                requires(
+                        std::conjunction_v<std::is_assignable<const T &, T>, std::is_assignable<const Rest &, Rest>...>)
+            {
+                this->member = std::forward<T>(other.member);
+                this->next = std::move(other.next);
+                return *this;
+            }
+
+            template<usize I, typename U, typename... URest>
+            constexpr TupleMember &operator=(const TupleMember<I, U, URest...> &other) noexcept(
+                    std::conjunction_v<std::is_nothrow_assignable<T &, const U &>,
+                                       std::is_nothrow_assignable<Rest &, const URest &>...>)
+                requires(std::conjunction_v<std::is_assignable<T &, const U &>,
+                                            std::is_assignable<Rest &, const URest &>...>)
+            {
+                this->member = other.member;
+                this->next = other.next;
+                return *this;
+            }
+
+            template<usize I, typename U, typename... URest>
+            constexpr const TupleMember &operator=(const TupleMember<I, U, URest...> &other) const
+                    noexcept(std::conjunction_v<std::is_nothrow_assignable<const T &, const U &>,
+                                                std::is_nothrow_assignable<const Rest &, const URest &>...>)
+                requires(std::conjunction_v<std::is_assignable<const T &, const U &>,
+                                            std::is_assignable<const Rest &, const URest &>...>)
+            {
+                this->member = other.member;
+                this->next = other.next;
+                return *this;
+            }
+
+            template<usize I, typename U, typename... URest>
+            constexpr TupleMember &operator=(TupleMember<I, U, URest...> &&other) noexcept(
+                    std::conjunction_v<std::is_nothrow_assignable<T &, U>,
+                                       std::is_nothrow_assignable<Rest &, URest>...>)
+                requires(std::conjunction_v<std::is_assignable<T &, U>, std::is_assignable<Rest &, URest>...>)
+            {
+                this->member = std::forward<T>(other.member);
+                this->next = std::move(other.next);
+                return *this;
+            }
+
+            template<usize I, typename U, typename... URest>
+            constexpr const TupleMember &operator=(TupleMember<I, U, URest...> &&other) const
+                    noexcept(std::conjunction_v<std::is_nothrow_assignable<const T &, U>,
+                                                std::is_nothrow_assignable<const Rest &, URest>...>)
+                requires(std::conjunction_v<std::is_assignable<const T &, U>,
+                                            std::is_assignable<const Rest &, URest>...>)
+            {
+                this->member = std::forward<T>(other.member);
+                this->next = std::move(other.next);
+                return *this;
+            }
+
+            template<usize I, typename U, typename... URest>
+            friend constexpr bool operator==(const TupleMember &lhs, const TupleMember<I, U, URest...> &rhs) noexcept {
+                if (!(lhs.member == rhs.member))
+                    return false;
+                return lhs.next == rhs.next;
+            }
+
+            template<usize I, typename U, typename... URest>
+            friend constexpr std::common_comparison_category_t<
+                    decltype(three_way(std::declval<const T &>(), std::declval<const U &>())),
+                    decltype(three_way(std::declval<const Rest &>(), std::declval<const URest &>()))...>
+            operator<=>(const TupleMember &lhs, const TupleMember<I, U, URest...> &rhs) noexcept {
+                if (auto c = three_way(lhs.member, rhs.member); c != 0)
+                    return c;
+                return three_way(lhs.next, rhs.next);
+            }
+        };
+
+        template<usize Index, typename T>
+        struct TupleMember<Index, T> : ConstexprValue<Index> {
+            T member;
+
+            constexpr TupleMember() noexcept(std::conjunction_v<std::is_nothrow_default_constructible<T>>)
+                requires(std::conjunction_v<std::is_default_constructible<T>>)
+            = default;
+
+            constexpr TupleMember(const T &member) noexcept(std::conjunction_v<std::is_nothrow_copy_constructible<T>>)
+                requires(std::conjunction_v<std::is_copy_constructible<T>>)
+                : member(member) {}
+
+            template<typename U>
+            constexpr TupleMember(U &&member) noexcept(std::conjunction_v<std::is_nothrow_constructible<T, U>>)
+                requires(std::conjunction_v<std::is_constructible<T, U>>)
+                : member(std::forward<U>(member)) {}
+
+            template<usize I, typename U>
+            constexpr TupleMember(TupleMember<I, U> &other) noexcept(
+                    std::conjunction_v<std::is_nothrow_constructible<T, U &>>)
+                requires(std::conjunction_v<std::is_constructible<T, U &>>)
+                : member(other.member) {}
+
+            template<usize I, typename U>
+            constexpr TupleMember(const TupleMember<I, U> &other) noexcept(
+                    std::conjunction_v<std::is_nothrow_constructible<T, const U &>>)
+                requires(std::conjunction_v<std::is_constructible<T, const U &>>)
+                : member(other.member) {}
+
+            template<usize I, typename U>
+            constexpr TupleMember(TupleMember<I, U> &&other) noexcept(
+                    std::conjunction_v<std::is_nothrow_constructible<T, U &&>>)
+                requires(std::conjunction_v<std::is_constructible<T, U &&>>)
+                : member(std::move(other.member)) {}
+
+            template<usize I, typename U>
+            constexpr TupleMember(const TupleMember<I, U> &&other) noexcept(
+                    std::conjunction_v<std::is_nothrow_constructible<T, const U &&>>)
+                requires(std::conjunction_v<std::is_constructible<T, const U &&>>)
+                : member(std::move(other.member)) {}
+
+            constexpr TupleMember(const TupleMember &other) noexcept(
+                    std::conjunction_v<std::is_nothrow_copy_constructible<T>>) = default;
+
+            constexpr TupleMember(TupleMember &&other) noexcept(
+                    std::conjunction_v<std::is_nothrow_move_constructible<T>>) = default;
+
+            constexpr TupleMember &
+            operator=(const TupleMember &other) noexcept(std::conjunction_v<std::is_nothrow_copy_assignable<T>>)
+                requires(std::conjunction_v<std::is_copy_assignable<T>>)
+            {
+                this->member = other.member;
+                return *this;
+            }
+
+            constexpr const TupleMember &operator=(const TupleMember &other) const
+                    noexcept(std::conjunction_v<std::is_nothrow_copy_assignable<const T>>)
+                requires(std::conjunction_v<std::is_copy_assignable<const T>>)
+            {
+                this->member = other.member;
+                return *this;
+            }
+
+            constexpr TupleMember &
+            operator=(TupleMember &&other) noexcept(std::conjunction_v<std::is_nothrow_move_assignable<T>>)
+                requires(std::conjunction_v<std::is_move_assignable<T>>)
+            {
+                this->member = std::forward<T>(other.member);
+                return *this;
+            }
+
+            constexpr const TupleMember &operator=(TupleMember &&other) const
+                    noexcept(std::conjunction_v<std::is_nothrow_assignable<const T &, T>>)
+                requires(std::conjunction_v<std::is_assignable<const T &, T>>)
+            {
+                this->member = std::forward<T>(other.member);
+                return *this;
+            }
+
+            template<usize I, typename U>
+            constexpr TupleMember &operator=(const TupleMember<I, U> &other) noexcept(
+                    std::conjunction_v<std::is_nothrow_assignable<T &, const U &>>)
+                requires(std::conjunction_v<std::is_assignable<T &, const U &>>)
+            {
+                this->member = other.member;
+                return *this;
+            }
+
+            template<usize I, typename U>
+            constexpr const TupleMember &operator=(const TupleMember<I, U> &other) const
+                    noexcept(std::conjunction_v<std::is_nothrow_assignable<const T &, const U &>>)
+                requires(std::conjunction_v<std::is_assignable<const T &, const U &>>)
+            {
+                this->member = other.member;
+                return *this;
+            }
+
+            template<usize I, typename U>
+            constexpr TupleMember &
+            operator=(TupleMember<I, U> &&other) noexcept(std::conjunction_v<std::is_nothrow_assignable<T &, U>>)
+                requires(std::conjunction_v<std::is_assignable<T &, U>>)
+            {
+                this->member = std::forward<T>(other.member);
+                return *this;
+            }
+
+            template<usize I, typename U>
+            constexpr const TupleMember &operator=(TupleMember<I, U> &&other) const
+                    noexcept(std::conjunction_v<std::is_nothrow_assignable<const T &, U>>)
+                requires(std::conjunction_v<std::is_assignable<const T &, U>>)
+            {
+                this->member = std::forward<T>(other.member);
+                return *this;
+            }
+
+            template<usize I, typename U>
+            friend constexpr bool operator==(const TupleMember &lhs, const TupleMember<I, U> &rhs) noexcept {
+                return lhs.member == rhs.member;
+            }
+
+            template<usize I, typename U>
+            friend constexpr auto operator<=>(const TupleMember &lhs, const TupleMember<I, U> &rhs) noexcept {
+                return three_way(lhs.member, rhs.member);
+            }
+        };
+
+        template<usize Index>
+        struct TupleMember<Index> : ConstexprValue<Index> {};
+
+        template<usize Index, typename Ret, typename Head>
+        constexpr Ret &get(Head &head) {
+            if constexpr (Head::Value == Index) {
+                return head.member;
+            }
+            else {
+                return get<Index, Ret>(head.next);
+            }
+        }
+        template<usize Index, typename Ret, typename Head>
+        constexpr Ret &&get(Head &&head) {
+            if constexpr (Head::Value == Index) {
+                return std::move(head.member);
+            }
+            else {
+                return get<Index, Ret>(std::move(head.next));
+            }
+        }
+        template<usize Index, typename Ret, typename Head>
+        constexpr Ret &get(const Head &head) {
+            if constexpr (Head::Value == Index) {
+                return head.member;
+            }
+            else {
+                return get<Index, Ret>(head.next);
+            }
+        }
+        template<usize Index, typename Ret, typename Head>
+        constexpr Ret &&get(const Head &&head) {
+            if constexpr (Head::Value == Index) {
+                return std::move(head.member);
+            }
+            else {
+                return get<Index, Ret>(std::move(head.next));
+            }
+        }
+    } // namespace tuple_detail
+
+    // NOTE(gabriel): Is guaranteed to have the same layout like a struct with the same types.
+    template<typename... Ts>
+    struct Tuple {
+        tuple_detail::TupleMember<0, Ts...> members;
+
+        constexpr Tuple() noexcept(std::conjunction_v<std::is_nothrow_default_constructible<Ts>...>)
+            requires(std::conjunction_v<std::is_default_constructible<Ts>...>)
+        = default;
+
+        constexpr Tuple(const Ts &...args) noexcept(std::conjunction_v<std::is_nothrow_copy_constructible<Ts>...>)
+            requires(sizeof...(Ts) > 0 and std::conjunction_v<std::is_copy_constructible<Ts>...>)
+            : members(args...) {}
+
+        template<typename... Us>
+        constexpr Tuple(Us &&...args) noexcept(std::conjunction_v<std::is_nothrow_constructible<Ts, Us>...>)
+            requires(sizeof...(Ts) > 0 and sizeof...(Ts) > sizeof...(Us) and
+                     std::conjunction_v<std::is_constructible<Ts, Us>...> and
+                     tuple_detail::FirstIsNotTuple<Us...>::Value)
+            : members(std::forward<Us>(args)...) {}
+
+        template<typename... Us>
+        constexpr Tuple(Tuple<Us...> &other)
+            requires(sizeof...(Ts) == sizeof...(Us) and std::conjunction_v<std::is_constructible<Ts, Us &>...> and
+                     (sizeof...(Ts) != 1 or
+                      !std::disjunction_v<std::is_convertible<decltype(other), Ts>...,
+                                          std::is_constructible<Ts, decltype(other)>..., std::is_same<Ts, Us>...>))
+            : members(other) {}
+
+        template<typename... Us>
+        constexpr Tuple(const Tuple<Us...> &other)
+            requires(sizeof...(Ts) == sizeof...(Us) and std::conjunction_v<std::is_constructible<Ts, const Us &>...> and
+                     (sizeof...(Ts) != 1 or
+                      !std::disjunction_v<std::is_convertible<decltype(other), Ts>...,
+                                          std::is_constructible<Ts, decltype(other)>..., std::is_same<Ts, Us>...>))
+            : members(other) {}
+
+        template<typename... Us>
+        constexpr Tuple(Tuple<Us...> &&other)
+            requires(sizeof...(Ts) == sizeof...(Us) and std::conjunction_v<std::is_constructible<Ts, Us &&>...> and
+                     (sizeof...(Ts) != 1 or
+                      !std::disjunction_v<std::is_convertible<decltype(other), Ts>...,
+                                          std::is_constructible<Ts, decltype(other)>..., std::is_same<Ts, Us>...>))
+            : members(std::move(other)) {}
+
+        template<typename... Us>
+        constexpr Tuple(const Tuple<Us...> &&other)
+            requires(sizeof...(Ts) == sizeof...(Us) and
+                     std::conjunction_v<std::is_constructible<Ts, const Us &&>...> and
+                     (sizeof...(Ts) != 1 or
+                      !std::disjunction_v<std::is_convertible<decltype(other), Ts>...,
+                                          std::is_constructible<Ts, decltype(other)>..., std::is_same<Ts, Us>...>))
+            : members(std::move(other)) {}
+
+        constexpr Tuple(const Tuple &other) noexcept(std::conjunction_v<std::is_nothrow_copy_constructible<Ts>...>) =
+                default;
+
+        constexpr Tuple(Tuple &&other) noexcept(std::conjunction_v<std::is_nothrow_move_constructible<Ts>...>) =
+                default;
+
+        constexpr Tuple &
+        operator=(const Tuple &other) noexcept(std::conjunction_v<std::is_nothrow_copy_assignable<Ts>...>)
+            requires(std::conjunction_v<std::is_copy_assignable<Ts>...>)
+        {
+            if (&other != this)
+                this->members = other.members;
+            return *this;
+        }
+
+        constexpr const Tuple &operator=(const Tuple &other) const
+                noexcept(std::conjunction_v<std::is_nothrow_copy_assignable<const Ts>...>)
+            requires(std::conjunction_v<std::is_copy_assignable<const Ts>...>)
+        {
+            if (&other != this)
+                this->members = other.members;
+            return *this;
+        }
+
+        constexpr Tuple &operator=(Tuple &&other) noexcept(std::conjunction_v<std::is_nothrow_move_assignable<Ts>...>)
+            requires(std::conjunction_v<std::is_move_assignable<Ts>...>)
+        {
+            if (&other != this)
+                this->members = std::move(other.members);
+            return *this;
+        }
+
+        constexpr const Tuple &operator=(Tuple &&other) const
+                noexcept(std::conjunction_v<std::is_nothrow_assignable<const Ts &, Ts>...>)
+            requires(std::conjunction_v<std::is_assignable<const Ts &, Ts>...>)
+        {
+            if (&other != this)
+                this->members = std::move(other.members);
+            return *this;
+        }
+
+        template<typename... Us>
+        constexpr Tuple &operator=(const Tuple<Us...> &other) noexcept(
+                std::conjunction_v<std::is_nothrow_assignable<Ts &, const Us &>...>)
+            requires((sizeof...(Ts) == sizeof...(Us)) and std::conjunction_v<std::is_assignable<Ts &, const Us &>...>)
+        {
+            if (&other != this)
+                this->members = other.members;
+            return *this;
+        }
+
+        template<typename... Us>
+        constexpr const Tuple &operator=(const Tuple<Us...> &other) const
+                noexcept(std::conjunction_v<std::is_nothrow_assignable<const Ts &, const Us &>...>)
+            requires((sizeof...(Ts) == sizeof...(Us)) and
+                     std::conjunction_v<std::is_assignable<const Ts &, const Us &>...>)
+        {
+            if (&other != this)
+                this->members = other.members;
+            return *this;
+        }
+
+        template<typename... Us>
+        constexpr Tuple &
+        operator=(Tuple<Us...> &&other) noexcept(std::conjunction_v<std::is_nothrow_assignable<Ts &, Us>...>)
+            requires((sizeof...(Ts) == sizeof...(Us)) and std::conjunction_v<std::is_assignable<Ts &, Us>...>)
+        {
+            if (&other != this)
+                this->members = std::move(other.members);
+            return *this;
+        }
+
+        template<typename... Us>
+        constexpr const Tuple &operator=(Tuple<Us...> &&other) const
+                noexcept(std::conjunction_v<std::is_nothrow_assignable<const Ts &, Us>...>)
+            requires((sizeof...(Ts) == sizeof...(Us)) and std::conjunction_v<std::is_assignable<const Ts &, Us>...>)
+        {
+            if (&other != this)
+                this->members = std::move(other.members);
+            return *this;
+        }
+
+        template<typename... Us>
+        friend constexpr bool operator==(const Tuple &lhs, const Tuple<Us...> &rhs) noexcept
+            requires(tuple_detail::IsEqualityComparable<Ts, Us>::Value and ...)
+        {
+            return lhs.members == rhs.members;
+        }
+
+        template<typename... Us>
+        friend constexpr auto operator<=>(const Tuple &lhs, const Tuple<Us...> &rhs) noexcept
+            requires(tuple_detail::HasOrder<Ts, Us>::Value and ...)
+        {
+            return lhs.members <=> rhs.members;
+        }
+    };
+
+    template<typename... Ts>
+    struct tuple_detail::IsTuple<Tuple<Ts...>> : ConstexprValue<true> {};
+
+    template<typename T>
+    struct TupleSize;
+
+    template<typename T>
+    struct TupleSize<const T> : ConstexprValue<TupleSize<T>::Value> {};
+
+    template<typename... Ts>
+    struct TupleSize<Tuple<Ts...>> : ConstexprValue<sizeof...(Ts)> {};
+
+    template<typename T>
+    constexpr usize TupleSizeV = TupleSize<T>::Value;
+
+    template<usize Index, typename T>
+    struct TupleElement;
+
+    template<usize Index, typename T>
+    struct TupleElement<Index, const T> {
+        using Type = typename std::add_const<typename TupleElement<Index, T>::Type>::type;
+    };
+
+    template<usize Index, typename Head, typename... Rest>
+    struct TupleElement<Index, Tuple<Head, Rest...>> : TupleElement<Index - 1, Tuple<Rest...>> {};
+
+    template<typename Head, typename... Rest>
+    struct TupleElement<0, Tuple<Head, Rest...>> {
+        using Type = Head;
+    };
+
+    template<usize Index, typename T>
+    using TupleElementT = typename TupleElement<Index, T>::Type;
+
+    template<usize Index, typename... Ts>
+    constexpr TupleElementT<Index, Tuple<Ts...>> &get(Tuple<Ts...> &t) {
+        return tuple_detail::get<Index, TupleElementT<Index, Tuple<Ts...>>>(t.members);
+    }
+    template<usize Index, typename... Ts>
+    constexpr TupleElementT<Index, Tuple<Ts...>> &&get(Tuple<Ts...> &&t) {
+        return tuple_detail::get<Index, TupleElementT<Index, Tuple<Ts...>>>(std::move(t.members));
+    }
+    template<usize Index, typename... Ts>
+    constexpr TupleElementT<Index, const Tuple<Ts...>> &get(const Tuple<Ts...> &t) {
+        return tuple_detail::get<Index, TupleElementT<Index, const Tuple<Ts...>>>(t.members);
+    }
+    template<usize Index, typename... Ts>
+    constexpr TupleElementT<Index, const Tuple<Ts...>> &&get(const Tuple<Ts...> &&t) {
+        return tuple_detail::get<Index, TupleElementT<Index, const Tuple<Ts...>>>(std::move(t.members));
+    }
+
+    namespace tuple_detail {
+        template<usize N, std::array<usize, N> Indices, usize... I>
+        consteval static auto arrayToIndexSequence(std::index_sequence<I...>) {
+            return std::index_sequence<std::get<I>(Indices)...>{};
+        }
+
+        template<usize N, std::array<usize, N> Indices>
+        consteval static auto arrayToIndexSequence() {
+            return arrayToIndexSequence<N, Indices>(std::make_index_sequence<N>{});
+        }
+
+        template<typename... Tuples>
+        struct ConcatArrayLen;
+
+        template<typename Tuple, typename... Rest>
+        struct ConcatArrayLen<Tuple, Rest...> : ConstexprValue<TupleSizeV<Tuple> + ConcatArrayLen<Rest...>::Value> {};
+
+        template<>
+        struct ConcatArrayLen<> : ConstexprValue<static_cast<usize>(0)> {};
+
+        template<usize I, usize Start, typename... Tuples>
+        consteval static void fillConcatTupleIndices(std::array<usize, ConcatArrayLen<Tuples...>::Value> &indices) {
+            if constexpr (I == sizeof...(Tuples))
+                return;
+            else {
+                using T = TupleElementT<I, Tuple<Tuples...>>;
+                for (usize i = Start; i < Start + TupleSizeV<T>; i++) {
+                    indices[i] = I;
+                }
+                fillConcatTupleIndices<I + 1, Start + TupleSizeV<T>, Tuples...>(indices);
+            }
+        }
+
+        template<typename... Tuples>
+        consteval static std::array<usize, ConcatArrayLen<Tuples...>::Value> makeConcatTupleIndices() {
+            std::array<usize, ConcatArrayLen<Tuples...>::Value> indices = {};
+            fillConcatTupleIndices<0, 0, Tuples...>(indices);
+            return indices;
+        }
+
+        template<usize I, usize Start, typename... Tuples>
+        consteval static void
+        fillConcatTupleElementIndices(std::array<usize, ConcatArrayLen<Tuples...>::Value> &indices) {
+            if constexpr (I == sizeof...(Tuples))
+                return;
+            else {
+                using T = TupleElementT<I, Tuple<Tuples...>>;
+                for (usize i = Start, j = 0; i < Start + TupleSizeV<T>; i++, j++) {
+                    indices[i] = j;
+                }
+                fillConcatTupleElementIndices<I + 1, Start + TupleSizeV<T>, Tuples...>(indices);
+            }
+        }
+
+        template<typename... Tuples>
+        consteval static std::array<usize, ConcatArrayLen<Tuples...>::Value> makeConcatTupleElementIndices() {
+            std::array<usize, ConcatArrayLen<Tuples...>::Value> indices = {};
+            fillConcatTupleElementIndices<0, 0, Tuples...>(indices);
+            return indices;
+        }
+
+        template<typename TupleTuple, typename TupleIndices, typename ElementIndices>
+        struct ConcatResultImpl;
+
+        template<typename TupleTuple, usize... TupleIndices, usize... ElementIndices>
+        struct ConcatResultImpl<TupleTuple, std::index_sequence<TupleIndices...>,
+                                std::index_sequence<ElementIndices...>> {
+            using Type = Tuple<TupleElementT<ElementIndices, TupleElementT<TupleIndices, TupleTuple>>...>;
+        };
+
+        template<typename... Tuples>
+        struct ConcatUtil {
+            using TupleTuple = Tuple<Tuples...>;
+            constexpr static auto TupIndices = makeConcatTupleIndices<Tuples...>();
+            constexpr static auto ElemIndices = makeConcatTupleElementIndices<Tuples...>();
+            constexpr static auto TupSequence = arrayToIndexSequence<TupIndices.size(), TupIndices>();
+            constexpr static auto ElemSequence = arrayToIndexSequence<ElemIndices.size(), ElemIndices>();
+            using Type = typename ConcatResultImpl<TupleTuple, std::remove_cv_t<decltype(TupSequence)>,
+                                                   std::remove_cv_t<decltype(ElemSequence)>>::Type;
+        };
+
+        template<typename TupleTuple, usize... TupleIndices, usize... ElementIndices>
+        consteval typename ConcatResultImpl<TupleTuple, std::index_sequence<TupleIndices...>,
+                                            std::index_sequence<ElementIndices...>>::Type
+        concatUtil(TupleTuple &&tuple, std::index_sequence<TupleIndices...>, std::index_sequence<ElementIndices...>) {
+            return Tuple{get<ElementIndices>(get<TupleIndices>(std::forward<TupleTuple>(tuple)))...};
+        }
+    } // namespace tuple_detail
+
+    template<typename... Ts>
+    constexpr static Tuple<std::decay_t<Ts>...> makeTuple(Ts &&...args) {
+        return Tuple{std::forward<Ts>(args)...};
+    }
+
+    template<typename... Tuples>
+    constexpr static typename tuple_detail::ConcatUtil<Tuples...>::Type concatTuple(Tuples &&...tuples) {
+        using ConcatUtil = tuple_detail::ConcatUtil<Tuples...>;
+        return tuple_detail::concatUtil(makeTuple<Tuples...>(std::forward<Tuples>(tuples)...), ConcatUtil::TupSequence,
+                                        ConcatUtil::ElemSequence);
+    }
+
+    static_assert(TupleSizeV<Tuple<>> == 0);
+    static_assert(TupleSizeV<Tuple<int, float, double>> == 3);
+
+    static_assert(TupleSizeV<const Tuple<>> == 0);
+    static_assert(TupleSizeV<const Tuple<int, float, double>> == 3);
+
+    static_assert(std::is_same_v<TupleElementT<0, Tuple<int, float, double>>, int>);
+    static_assert(std::is_same_v<TupleElementT<1, Tuple<int, float, double>>, float>);
+    static_assert(std::is_same_v<TupleElementT<2, Tuple<int, float, double>>, double>);
+
+    static_assert(std::is_same_v<TupleElementT<0, const Tuple<int, float, double>>, const int>);
+    static_assert(std::is_same_v<TupleElementT<1, const Tuple<int, float, double>>, const float>);
+    static_assert(std::is_same_v<TupleElementT<2, const Tuple<int, float, double>>, const double>);
+
+    static_assert(makeTuple(5, 10) == makeTuple(5.0, 10.0));
+    static_assert(makeTuple(5, 11) != makeTuple(5.0, 10.0));
+
+    static_assert(std::is_same_v<decltype(makeTuple(5, 10)), Tuple<int, int>>);
+    static_assert(std::is_same_v<decltype(concatTuple(makeTuple(5, 10))), Tuple<int, int>>);
+    static_assert(std::is_same_v<decltype(concatTuple(makeTuple(5, 10), makeTuple(5.0f, 10.0f))),
+                                 Tuple<int, int, float, float>>);
 
     // -----------------------------------------
     // memory ----------------------------------
@@ -6509,30 +7185,20 @@ namespace fstd {
 
         template<typename... Ts>
         struct SymbolExportList {
-            constexpr SymbolExportList(const SymbolExport<Ts> &...args) noexcept : symbols() {
-                copyToTuple(this->symbols, args..., std::make_index_sequence<sizeof...(Ts)>{});
-            }
+            constexpr SymbolExportList(const Tuple<SymbolExport<Ts>...> &tuple) noexcept : symbols(tuple) {}
+            constexpr SymbolExportList(const SymbolExport<Ts> &...args) noexcept : symbols(makeTuple(args...)) {}
             constexpr SymbolExportList(const SymbolExportList &other) noexcept = default;
             constexpr SymbolExportList(SymbolExportList &&other) noexcept = default;
             constexpr SymbolExportList &operator=(const SymbolExportList &other) noexcept = default;
             constexpr SymbolExportList &operator=(SymbolExportList &&other) noexcept = default;
 
             constexpr static usize NumExports = sizeof...(Ts);
-            detail::Tuple<SymbolExport<Ts>...> symbols;
+            Tuple<SymbolExport<Ts>...> symbols;
 
-            template<usize... I>
-            static constexpr void copyToTuple(auto &tuple, const SymbolExport<Ts> &...args, std::index_sequence<I...>) {
-                ((tuple.template getMember<I>() = args), ...);
-            }
-            template<typename T, usize... I>
-            constexpr SymbolExportList<Ts..., T> withImpl(const SymbolExport<T> &sym,
-                                                          std::index_sequence<I...>) noexcept {
-                return {this->symbols.template getMember<I>()..., sym};
-            }
             template<typename... Args>
             constexpr auto with(Args &&...args) noexcept -> decltype(auto) {
-                SymbolExport exp{std::forward<Args>(args)...};
-                return this->withImpl(exp, std::make_index_sequence<sizeof...(Ts)>{});
+                return SymbolExportList{
+                        concatTuple(this->symbols, makeTuple(SymbolExport{std::forward<Args>(args)...}))};
             }
         };
 
