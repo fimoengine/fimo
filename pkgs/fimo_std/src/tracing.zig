@@ -801,22 +801,8 @@ pub fn stackTraceFormatter(
     else |_|
         buffer_len;
 
-    const debug_info = std.debug.getSelfDebugInfo() catch |err| return if (std.fmt.bufPrint(
-        buf,
-        "Unable to dump stack trace: Unable to open debug info: {s}",
-        .{@errorName(err)},
-    )) |out|
-        out.len
-    else |_|
-        buffer_len;
     var writer: std.Io.Writer = .fixed(buf);
-    std.debug.writeStackTrace(stack_trace.*, &writer, debug_info, .no_color) catch |err| switch (err) {
-        error.WriteFailed => {},
-        else => return if (std.fmt.bufPrint(buf, "Unable to dump stack trace: {s}", .{@errorName(err)})) |out|
-            out.len
-        else |_|
-            buffer_len,
-    };
+    std.debug.writeStackTrace(stack_trace, &writer, .no_color) catch {};
     return writer.buffered().len;
 }
 
