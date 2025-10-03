@@ -4086,30 +4086,6 @@ namespace fstd {
             return offsetOfImpl<Member, Base, 0, sizeof(Base)>();
         }
 
-        template<typename F, typename Ret, typename... Args>
-        concept InvocableWithReturn = std::invocable<F, Args...> && requires(F &&f, Args &&...args) {
-            { f(std::forward<Args>(args)...) } -> std::same_as<Ret>;
-        };
-
-        template<InvocableWithReturn<void> F>
-        struct [[nodiscard]] ScopeGuard final {
-            F callback;
-            bool active;
-
-            using CallbackType = F;
-            ScopeGuard() noexcept = delete;
-            explicit ScopeGuard(F &&callback) noexcept(std::is_nothrow_constructible_v<F, F &&>) :
-                callback(std::forward<F>(callback)), active(true) {}
-            ScopeGuard(const ScopeGuard &other) noexcept = delete;
-            ScopeGuard &operator=(const ScopeGuard &other) noexcept = delete;
-            ScopeGuard &operator=(ScopeGuard &&other) noexcept = delete;
-            ~ScopeGuard() noexcept {
-                if (this->active)
-                    this->callback();
-            }
-            void dismiss() noexcept { this->active = false; }
-        };
-
         inline void expectedNullTerminatedArray() {}
         template<std::size_t N>
         struct ConstString {
@@ -4161,10 +4137,95 @@ namespace fstd {
         };
     } // namespace detail
 
-    template<detail::InvocableWithReturn<void> Callback>
-    inline static detail::ScopeGuard<Callback> makeScopeGuard(Callback &&callback) noexcept(
-            std::is_nothrow_constructible_v<detail::ScopeGuard<Callback>, Callback &&>) {
-        return detail::ScopeGuard{std::forward<Callback>(callback)};
+    template<typename F, typename Ret, typename... Args>
+    concept InvocableWithReturn = std::invocable<F, Args...> && requires(F &&f, Args &&...args) {
+        { f(std::forward<Args>(args)...) } -> std::same_as<Ret>;
+    };
+
+    template<typename F, typename Ret, typename... Args>
+    concept Callback = InvocableWithReturn<F, Ret, void *, Args...> or InvocableWithReturn<F, Ret, Args...>;
+
+    template<typename T>
+    struct CallbackUtils;
+
+    template<typename Ret, typename... Args>
+    struct CallbackUtils<Ret (*)(void *, Args...)> {
+        using CallbackPtr = Ret (*)(void *, Args...);
+        struct Callable {
+            void *context;
+            CallbackPtr callback;
+        };
+
+        template<Callback<Ret, Args...> F>
+        constexpr static bool HasContextArg = InvocableWithReturn<F, Ret, void *, Args...>;
+
+        template<Callback<Ret, Args...> F>
+        constexpr static Callable wrap(F &f) noexcept {
+            if constexpr (std::is_convertible_v<F, CallbackPtr>) {
+                return {
+                        .context = nullptr,
+                        .callback = f,
+                };
+            }
+            else if constexpr (std::is_function_v<F>) {
+                static_assert(!HasContextArg<F>);
+                return {
+                        .context = const_cast<void *>(reinterpret_cast<const void *>(f)),
+                        .callback = [](void *ctx, Args... args) -> Ret {
+                            F f = reinterpret_cast<F>(const_cast<const void *>(ctx));
+                            return std::invoke_r<Ret>(f, std::forward<Args>(args)...);
+                        },
+                };
+            }
+            else {
+                static_assert(HasContextArg<F>);
+                return {
+                        .context = &f,
+                        .callback = [](void *ctx, Args... args) -> Ret {
+                            F &f = *static_cast<F *>(ctx);
+                            return std::invoke_r<Ret>(f, std::forward<Args>(args)...);
+                        },
+                };
+            }
+        }
+
+        template<Callback<Ret, Args...> F, F f>
+        constexpr static auto wrap(ConstexprValue<f>) noexcept {
+            if constexpr (HasContextArg<F>) {
+                return ConstexprValue<f>{};
+            }
+            else {
+                constexpr static auto wrapper = [](void *, Args... args) -> Ret {
+                    return std::invoke_r<Ret>(f, std::forward<Args>(args)...);
+                };
+                return ConstexprValue<wrapper>{};
+            }
+        }
+    };
+
+    template<InvocableWithReturn<void> F>
+    struct [[nodiscard]] ScopeGuard final {
+        F callback;
+        bool active;
+
+        using CallbackType = F;
+        ScopeGuard() noexcept = delete;
+        explicit ScopeGuard(F &&callback) noexcept(std::is_nothrow_constructible_v<F, F &&>) :
+            callback(std::forward<F>(callback)), active(true) {}
+        ScopeGuard(const ScopeGuard &other) noexcept = delete;
+        ScopeGuard &operator=(const ScopeGuard &other) noexcept = delete;
+        ScopeGuard &operator=(ScopeGuard &&other) noexcept = delete;
+        ~ScopeGuard() noexcept {
+            if (this->active)
+                this->callback();
+        }
+        void dismiss() noexcept { this->active = false; }
+    };
+
+    template<InvocableWithReturn<void> Callback>
+    inline static ScopeGuard<Callback>
+    makeScopeGuard(Callback &&callback) noexcept(std::is_nothrow_constructible_v<ScopeGuard<Callback>, Callback &&>) {
+        return ScopeGuard{std::forward<Callback>(callback)};
     }
 
     template<typename... Args>
