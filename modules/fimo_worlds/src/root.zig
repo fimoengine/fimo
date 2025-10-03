@@ -220,7 +220,7 @@ fn Block(T: type, comptime n: usize) type {
     return struct {
         pub const capacity: usize = n;
 
-        entries: [8]?*T = @splat(null),
+        entries: [8]?T = @splat(null),
         next: ?*@This() = null,
 
         fn count(self: *@This()) usize {
@@ -236,7 +236,7 @@ fn Block(T: type, comptime n: usize) type {
             return num;
         }
 
-        fn append(self: *@This(), entry: *T) bool {
+        fn append(self: *@This(), entry: T) bool {
             var curr: ?*@This() = self;
             while (curr) |current| : (curr = current.next) {
                 for (&current.entries) |*dst| {
@@ -261,7 +261,7 @@ fn Block(T: type, comptime n: usize) type {
             unreachable;
         }
 
-        fn remove(self: *@This(), entry: *T) void {
+        fn remove(self: *@This(), entry: T) void {
             var curr: ?*@This() = self;
             while (curr) |current| {
                 for (current.entries, 0..) |s, i| {
@@ -289,21 +289,24 @@ fn Block(T: type, comptime n: usize) type {
     };
 }
 
-const ResBlock = Block(Res, 8);
-const CondBlock = Block(Cond, 8);
-const SysBlock = Block(Sys, 8);
+const ArgBlock = Block(Arg, 8);
+const CondBlock = Block(*Cond, 8);
+const SysBlock = Block(*Sys, 8);
+
+const Arg = union(enum) {
+    read_resource: *Res,
+    write_resource: *Res,
+};
 
 pub const CondDesc = struct {
-    read: []const *Res,
-    write: []const *Res,
+    args: []const Arg,
     data: ?*anyopaque,
     cond: fimo_worlds.Sys.Cond,
 };
 
 const Cond = struct {
     scheduler: *Scheduler,
-    read: ?*ResBlock,
-    write: ?*ResBlock,
+    args: ?*ArgBlock,
     data: ?*anyopaque,
     cond: fimo_worlds.Sys.Cond,
     next: ?*Cond = null,
@@ -316,8 +319,7 @@ pub const SysDesc = struct {
     data: union(enum) {
         sys: struct {
             label: []const u8,
-            read: []const *Res,
-            write: []const *Res,
+            args: []const Arg,
             data: ?*anyopaque,
             system: fimo_worlds.Sys.Run,
         },
@@ -349,9 +351,16 @@ pub const SysDesc = struct {
             next_desc.conditions = if (next_c.conditions.intoSlice()) |conds| blk: {
                 const cond_desc = try allocator.alloc(CondDesc, conds.len);
                 for (cond_desc, conds) |*dst, src| {
+                    const args = try allocator.alloc(Arg, src.args.len);
+                    for (args, src.args.intoSliceOrEmpty()) |*arg_dst, arg| {
+                        arg_dst.* = switch (arg.tag) {
+                            .read_resource => .{ .read_resource = @ptrCast(@alignCast(arg.handle.resource)) },
+                            .write_resource => .{ .write_resource = @ptrCast(@alignCast(arg.handle.resource)) },
+                        };
+                    }
+
                     dst.* = .{
-                        .read = @ptrCast(@alignCast(src.read.intoSliceOrEmpty())),
-                        .write = @ptrCast(@alignCast(src.write.intoSliceOrEmpty())),
+                        .args = args,
                         .data = src.data,
                         .cond = src.condition,
                     };
@@ -362,11 +371,18 @@ pub const SysDesc = struct {
             switch (next_c.tag) {
                 .sys => {
                     const next_sys = next_c.data.sys;
+                    const args = try allocator.alloc(Arg, next_sys.args.len);
+                    for (args, next_sys.args.intoSliceOrEmpty()) |*arg_dst, arg| {
+                        arg_dst.* = switch (arg.tag) {
+                            .read_resource => .{ .read_resource = @ptrCast(@alignCast(arg.handle.resource)) },
+                            .write_resource => .{ .write_resource = @ptrCast(@alignCast(arg.handle.resource)) },
+                        };
+                    }
+
                     next_desc.data = .{
                         .sys = .{
                             .label = next_sys.label.intoSliceOrEmpty(),
-                            .read = @ptrCast(@alignCast(next_sys.read.intoSliceOrEmpty())),
-                            .write = @ptrCast(@alignCast(next_sys.write.intoSliceOrEmpty())),
+                            .args = args,
                             .data = next_sys.data,
                             .system = next_sys.system,
                         },
@@ -409,8 +425,7 @@ pub const Sys = struct {
     after_subset: ?*SysBlock,
     parent_conditions: ?*CondBlock,
     conditions: ?*CondBlock,
-    read: ?*ResBlock,
-    write: ?*ResBlock,
+    args: ?*ArgBlock,
     data: ?*anyopaque,
     run: fimo_worlds.Sys.Run,
     deinit_fence: ?*Fence,
@@ -489,24 +504,16 @@ pub const Sys = struct {
             self.conditions = block.next;
             for (block.entries) |opt_cond| {
                 const cond = opt_cond orelse break;
-                while (cond.read) |block2| {
-                    cond.read = block2.next;
-                    scheduler.deallocResBlock(block2);
-                }
-                while (cond.write) |block2| {
-                    cond.write = block2.next;
-                    scheduler.deallocResBlock(block2);
+                while (cond.args) |block2| {
+                    cond.args = block2.next;
+                    scheduler.deallocArgBlock(block2);
                 }
             }
             scheduler.deallocCondBlock(block);
         }
-        while (self.read) |block| {
-            self.read = block.next;
-            scheduler.deallocResBlock(block);
-        }
-        while (self.write) |block| {
-            self.write = block.next;
-            scheduler.deallocResBlock(block);
+        while (self.args) |block| {
+            self.args = block.next;
+            scheduler.deallocArgBlock(block);
         }
         scheduler.deallocSys(self);
     }
@@ -535,8 +542,7 @@ const ResInfo = struct {
 };
 
 const CondTask = struct {
-    read: []*anyopaque,
-    write: []*anyopaque,
+    resources: []*anyopaque,
     cond: *Cond,
     arena: *Arena,
     task: Task,
@@ -546,24 +552,18 @@ const CondTask = struct {
         _ = idx;
         const self: *CondTask = @alignCast(@fieldParentPtr("task", task));
 
-        // NOTE(gabriel): Fill the read and write slices.
-        var i: usize = 0;
-        var curr = self.cond.read;
+        // NOTE(gabriel): Fill the argument slices.
+        var next_resource: usize = 0;
+        var curr = self.cond.args;
         blk: while (curr) |current| {
             for (current.entries) |opt_res| {
-                const res = opt_res orelse break :blk;
-                self.read[i] = res.data.value;
-                i += 1;
-            }
-            curr = current.next;
-        }
-        i = 0;
-        curr = self.cond.write;
-        blk: while (curr) |current| {
-            for (current.entries) |opt_res| {
-                const res = opt_res orelse break :blk;
-                self.write[i] = res.data.value;
-                i += 1;
+                const arg = opt_res orelse break :blk;
+                switch (arg) {
+                    .read_resource, .write_resource => |v| {
+                        self.resources[next_resource] = v.data.value;
+                        next_resource += 1;
+                    },
+                }
             }
             curr = current.next;
         }
@@ -572,8 +572,7 @@ const CondTask = struct {
             .world = @ptrCast(self.cond.scheduler.world),
             .sched = @ptrCast(self.cond.scheduler),
             .arena = self.arena,
-            .read = .fromSlice(self.read),
-            .write = .fromSlice(self.write),
+            .resources = .fromSlice(self.resources),
         };
         if (!self.cond.cond(self.cond.data, &args)) {
             for (self.dependents.items) |dep|
@@ -583,8 +582,7 @@ const CondTask = struct {
 };
 
 const SysTask = struct {
-    read: []*anyopaque,
-    write: []*anyopaque,
+    resources: []*anyopaque,
     sys: *Sys,
     arena: *Arena,
     task: Task,
@@ -594,24 +592,18 @@ const SysTask = struct {
         _ = idx;
         const self: *SysTask = @alignCast(@fieldParentPtr("task", task));
 
-        // NOTE(gabriel): Fill the read and write slices.
-        var i: usize = 0;
-        var curr = self.sys.read;
+        // NOTE(gabriel): Fill the argument slices.
+        var next_resource: usize = 0;
+        var curr = self.sys.args;
         blk: while (curr) |current| {
             for (current.entries) |opt_res| {
-                const res = opt_res orelse break :blk;
-                self.read[i] = res.data.value;
-                i += 1;
-            }
-            curr = current.next;
-        }
-        i = 0;
-        curr = self.sys.write;
-        blk: while (curr) |current| {
-            for (current.entries) |opt_res| {
-                const res = opt_res orelse break :blk;
-                self.write[i] = res.data.value;
-                i += 1;
+                const arg = opt_res orelse break :blk;
+                switch (arg) {
+                    .read_resource, .write_resource => |v| {
+                        self.resources[next_resource] = v.data.value;
+                        next_resource += 1;
+                    },
+                }
             }
             curr = current.next;
         }
@@ -620,8 +612,7 @@ const SysTask = struct {
             .world = @ptrCast(self.sys.scheduler.world),
             .sched = @ptrCast(self.sys.scheduler),
             .arena = self.arena,
-            .read = .fromSlice(self.read),
-            .write = .fromSlice(self.write),
+            .resources = .fromSlice(self.resources),
         };
         self.fence = self.sys.run(self.sys.data, &args);
     }
@@ -714,7 +705,7 @@ pub const Scheduler = struct {
     free_systems: ?*Sys = null,
     cleanup_systems: ?*Sys = null,
     free_conditions: ?*Cond = null,
-    free_res_blocks: ?*ResBlock = null,
+    free_arg_blocks: ?*ArgBlock = null,
     free_cond_blocks: ?*CondBlock = null,
     free_sys_blocks: ?*SysBlock = null,
     cmds: []CmdBufCmd = undefined,
@@ -806,8 +797,7 @@ pub const Scheduler = struct {
                 try cond_stack.append(std_allocator, cond);
                 cond.* = .{
                     .scheduler = self,
-                    .read = self.allocFillResBlock(cond_desc.read),
-                    .write = self.allocFillResBlock(cond_desc.write),
+                    .args = self.allocFillArgBlock(cond_desc.args),
                     .data = cond_desc.data,
                     .cond = cond_desc.cond,
                 };
@@ -829,8 +819,7 @@ pub const Scheduler = struct {
                         .after_subset = undefined,
                         .parent_conditions = self.allocFillCondBlock(cond_stack.items[0 .. cond_stack.items.len - curr.conditions.len]),
                         .conditions = self.allocFillCondBlock(cond_stack.items[cond_stack.items.len - curr.conditions.len ..]),
-                        .read = self.allocFillResBlock(sys_desc.read),
-                        .write = self.allocFillResBlock(sys_desc.write),
+                        .args = self.allocFillArgBlock(sys_desc.args),
                         .data = sys_desc.data,
                         .run = sys_desc.system,
                         .deinit_fence = null,
@@ -926,10 +915,10 @@ pub const Scheduler = struct {
     }
 
     fn allocSys(self: *Scheduler) *Sys {
-        return if (self.free_systems) |value|
-            value
-        else
-            self.arena.allocator().create(Sys) catch @panic("oom");
+        return if (self.free_systems) |value| blk: {
+            self.free_systems = value.next;
+            break :blk value;
+        } else self.arena.allocator().create(Sys) catch @panic("oom");
     }
 
     fn deallocSys(self: *Scheduler, value: *Sys) void {
@@ -939,10 +928,10 @@ pub const Scheduler = struct {
     }
 
     fn allocCond(self: *Scheduler) *Cond {
-        return if (self.free_conditions) |value|
-            value
-        else
-            self.arena.allocator().create(Cond) catch @panic("oom");
+        return if (self.free_conditions) |value| blk: {
+            self.free_conditions = value.next;
+            break :blk value;
+        } else self.arena.allocator().create(Cond) catch @panic("oom");
     }
 
     fn deallocCond(self: *Scheduler, value: *Cond) void {
@@ -951,13 +940,13 @@ pub const Scheduler = struct {
         self.free_conditions = value;
     }
 
-    fn allocFillResBlock(self: *Scheduler, res: []const *Res) ?*ResBlock {
-        var head: ?*ResBlock = null;
-        var tail: ?*ResBlock = null;
-        var iter = std.mem.window(*Res, res, ResBlock.capacity, ResBlock.capacity);
+    fn allocFillArgBlock(self: *Scheduler, args: []const Arg) ?*ArgBlock {
+        var head: ?*ArgBlock = null;
+        var tail: ?*ArgBlock = null;
+        var iter = std.mem.window(Arg, args, ArgBlock.capacity, ArgBlock.capacity);
         while (iter.next()) |value| {
             if (value.len == 0) break;
-            const block = self.allocResBlock();
+            const block = self.allocArgBlock();
             block.* = .{};
             for (value, block.entries[0..value.len]) |bef, *entry| entry.* = bef;
             if (tail) |t| t.next = block else head = block;
@@ -967,17 +956,17 @@ pub const Scheduler = struct {
         return head;
     }
 
-    fn allocResBlock(self: *Scheduler) *ResBlock {
-        return if (self.free_res_blocks) |value|
-            value
-        else
-            self.arena.allocator().create(ResBlock) catch @panic("oom");
+    fn allocArgBlock(self: *Scheduler) *ArgBlock {
+        return if (self.free_arg_blocks) |value| blk: {
+            self.free_arg_blocks = value.next;
+            break :blk value;
+        } else self.arena.allocator().create(ArgBlock) catch @panic("oom");
     }
 
-    fn deallocResBlock(self: *Scheduler, value: *ResBlock) void {
+    fn deallocArgBlock(self: *Scheduler, value: *ArgBlock) void {
         value.* = undefined;
-        value.next = self.free_res_blocks;
-        self.free_res_blocks = value;
+        value.next = self.free_arg_blocks;
+        self.free_arg_blocks = value;
     }
 
     fn allocFillCondBlock(self: *Scheduler, conds: []const *Cond) ?*CondBlock {
@@ -997,10 +986,10 @@ pub const Scheduler = struct {
     }
 
     fn allocCondBlock(self: *Scheduler) *CondBlock {
-        return if (self.free_cond_blocks) |value|
-            value
-        else
-            self.arena.allocator().create(CondBlock) catch @panic("oom");
+        return if (self.free_cond_blocks) |value| blk: {
+            self.free_cond_blocks = value.next;
+            break :blk value;
+        } else self.arena.allocator().create(CondBlock) catch @panic("oom");
     }
 
     fn deallocCondBlock(self: *Scheduler, value: *CondBlock) void {
@@ -1026,10 +1015,10 @@ pub const Scheduler = struct {
     }
 
     fn allocSysBlock(self: *Scheduler) *SysBlock {
-        return if (self.free_sys_blocks) |value|
-            value
-        else
-            self.arena.allocator().create(SysBlock) catch @panic("oom");
+        return if (self.free_sys_blocks) |value| blk: {
+            self.free_sys_blocks = value.next;
+            break :blk value;
+        } else self.arena.allocator().create(SysBlock) catch @panic("oom");
     }
 
     fn deallocSysBlock(self: *Scheduler, value: *SysBlock) void {
@@ -1074,8 +1063,7 @@ pub const Scheduler = struct {
                 .deps = .empty,
                 .task = .{
                     .sys = .{
-                        .read = undefined,
-                        .write = undefined,
+                        .resources = undefined,
                         .sys = sys,
                         .arena = undefined,
                         .task = .{ .label = .init(sys.label[0..sys.label_len]), .run = &SysTask.run },
@@ -1085,25 +1073,18 @@ pub const Scheduler = struct {
             };
 
             {
-                var curr = sys.read;
+                var curr = sys.args;
                 while (curr) |block| : (curr = block.next) {
                     for (block.entries) |opt_res| {
-                        const res = opt_res orelse break;
-                        node.read.append(std_allocator, res) catch @panic("oom");
+                        const arg = opt_res orelse break;
+                        switch (arg) {
+                            .read_resource => |v| node.read.append(std_allocator, v) catch @panic("oom"),
+                            .write_resource => |v| node.write.append(std_allocator, v) catch @panic("oom"),
+                        }
                     }
                 }
             }
-            {
-                var curr = sys.write;
-                while (curr) |block| : (curr = block.next) {
-                    for (block.entries) |opt_res| {
-                        const res = opt_res orelse break;
-                        node.write.append(std_allocator, res) catch @panic("oom");
-                    }
-                }
-            }
-            node.task.sys.read = allocator.alloc(*anyopaque, node.read.items.len) catch @panic("oom");
-            node.task.sys.write = allocator.alloc(*anyopaque, node.write.items.len) catch @panic("oom");
+            node.task.sys.resources = allocator.alloc(*anyopaque, node.read.items.len + node.write.items.len) catch @panic("oom");
 
             if (sys.conditions != null) {
                 var curr = sys.conditions;
@@ -1121,8 +1102,7 @@ pub const Scheduler = struct {
                             .deps = .empty,
                             .task = .{
                                 .cond = .{
-                                    .read = undefined,
-                                    .write = undefined,
+                                    .resources = undefined,
                                     .cond = dep,
                                     .arena = undefined,
                                     .task = .{ .run = &CondTask.run },
@@ -1131,25 +1111,18 @@ pub const Scheduler = struct {
                             },
                         };
                         {
-                            var dep_curr = dep.read;
+                            var dep_curr = dep.args;
                             while (dep_curr) |block2| : (dep_curr = block2.next) {
                                 for (block2.entries) |opt_res| {
-                                    const res = opt_res orelse break;
-                                    dep_node.read.append(std_allocator, res) catch @panic("oom");
+                                    const arg = opt_res orelse break;
+                                    switch (arg) {
+                                        .read_resource => |v| dep_node.read.append(std_allocator, v) catch @panic("oom"),
+                                        .write_resource => |v| dep_node.write.append(std_allocator, v) catch @panic("oom"),
+                                    }
                                 }
                             }
                         }
-                        {
-                            var dep_curr = sys.write;
-                            while (dep_curr) |dep_block| : (dep_curr = dep_block.next) {
-                                for (dep_block.entries) |opt_res| {
-                                    const res = opt_res orelse break;
-                                    dep_node.write.append(std_allocator, res) catch @panic("oom");
-                                }
-                            }
-                        }
-                        dep_node.task.sys.read = allocator.alloc(*anyopaque, dep_node.read.items.len) catch @panic("oom");
-                        dep_node.task.sys.write = allocator.alloc(*anyopaque, dep_node.write.items.len) catch @panic("oom");
+                        dep_node.task.cond.resources = allocator.alloc(*anyopaque, dep_node.read.items.len + dep_node.write.items.len) catch @panic("oom");
 
                         var curr2 = sys.before;
                         while (curr2) |block2| : (curr2 = block2.next) {

@@ -362,13 +362,14 @@ test "Scheduler: run (single-threaded)" {
         .data = .{
             .sys = .{
                 .label = .fromSlice("my sys"),
-                .read = .fromSlice(null),
-                .write = .fromSlice(@ptrCast(&res)),
+                .args = .fromSlice(&.{
+                    .{ .tag = .write_resource, .handle = .{ .resource = @ptrCast(res) } },
+                }),
                 .data = null,
                 .system = &struct {
                     fn run(ctx: ?*anyopaque, args: *const Sys.Args) callconv(.c) ?*Fence {
                         _ = ctx;
-                        const v = args.getWrite(usize, 0);
+                        const v = args.getResource(usize, 0);
                         v.* += 1;
                         return null;
                     }
@@ -416,13 +417,14 @@ test "Scheduler: run (multi-threaded)" {
         .data = .{
             .sys = .{
                 .label = .fromSlice("my sys"),
-                .read = .fromSlice(null),
-                .write = .fromSlice(@ptrCast(&res)),
+                .args = .fromSlice(&.{
+                    .{ .tag = .write_resource, .handle = .{ .resource = @ptrCast(res) } },
+                }),
                 .data = null,
                 .system = &struct {
                     fn run(ctx: ?*anyopaque, args: *const Sys.Args) callconv(.c) ?*Fence {
                         _ = ctx;
-                        const v = args.getWrite(usize, 0);
+                        const v = args.getResource(usize, 0);
                         v.* += 1;
                         return null;
                     }
@@ -471,8 +473,9 @@ test "Scheduler: run (sub-task)" {
         .data = .{
             .sys = .{
                 .label = .fromSlice("my sys"),
-                .read = .fromSlice(null),
-                .write = .fromSlice(@ptrCast(&res)),
+                .args = .fromSlice(&.{
+                    .{ .tag = .write_resource, .handle = .{ .resource = @ptrCast(res) } },
+                }),
                 .data = null,
                 .system = &struct {
                     v: *usize,
@@ -498,7 +501,7 @@ test "Scheduler: run (sub-task)" {
                         const self = args.arena.allocator().create(@This()) catch unreachable;
                         self.* = .{
                             // NOTE(gabriel): Is only legal in this specific circumstance.
-                            .v = args.getWrite(usize, 0),
+                            .v = args.getResource(usize, 0),
                             .cmd = .{
                                 .tag = .enqueue_task,
                                 .payload = .{ .enqueue_task = &self.task },
@@ -543,19 +546,11 @@ pub const Sys = opaque {
         world: *World,
         sched: *Scheduler,
         arena: *Arena,
-        read: SliceConst(*anyopaque),
-        write: SliceConst(*anyopaque),
+        resources: SliceConst(*anyopaque),
 
-        /// Accesses a read-only resource.
-        pub fn getRead(self: *const Args, T: type, idx: usize) *T {
-            const read = self.read.intoSliceOrEmpty();
-            const ptr = read[idx];
-            return @ptrCast(@alignCast(ptr));
-        }
-
-        /// Accesses a read-write resource.
-        pub fn getWrite(self: *const Args, T: type, idx: usize) *T {
-            const read = self.write.intoSliceOrEmpty();
+        /// Accesses a resource.
+        pub fn getResource(self: *const Args, T: type, idx: usize) *T {
+            const read = self.resources.intoSliceOrEmpty();
             const ptr = read[idx];
             return @ptrCast(@alignCast(ptr));
         }
@@ -573,11 +568,19 @@ pub const Sys = opaque {
     /// If the function returns `false`, the scheduler will skip the execution of the system(-set).
     pub const Cond = *const fn (data: ?*anyopaque, args: *const Args) callconv(.c) bool;
 
+    pub const Arg = extern struct {
+        tag: enum(i32) {
+            read_resource = 0,
+            write_resource = 1,
+        },
+        handle: extern union {
+            resource: *Res(anyopaque),
+        },
+    };
+
     pub const CondDesc = extern struct {
-        /// List of required resrources with read access.
-        read: SliceConst(*Res(anyopaque)),
-        /// List of required resrources with write access.
-        write: SliceConst(*Res(anyopaque)),
+        /// List of required arguments.
+        args: SliceConst(Arg),
         /// Data to pass to the condition function.
         data: ?*anyopaque,
         /// Condition function to invoke.
@@ -604,10 +607,8 @@ pub const Sys = opaque {
         data: extern union {
             sys: extern struct {
                 label: SliceConst(u8) = .fromSlice(null),
-                /// List of required resrources with read access.
-                read: SliceConst(*Res(anyopaque)) = .fromSlice(null),
-                /// List of required resrources with write access.
-                write: SliceConst(*Res(anyopaque)) = .fromSlice(null),
+                /// List of required arguments.
+                args: SliceConst(Arg),
                 /// Data to pass to the system function.
                 data: ?*anyopaque = null,
                 /// System function to invoke.
@@ -703,7 +704,7 @@ test "Sys: cyclic dependency" {
     const sys_0 = try scheduler.addSys(.{
         .tag = .sys,
         .data = .{
-            .sys = .{ .system = &Dummy },
+            .sys = .{ .args = .fromSlice(null), .system = &Dummy },
         },
     });
     defer {
@@ -717,7 +718,7 @@ test "Sys: cyclic dependency" {
         .tag = .sys,
         .before = .fromSlice(&sys_1_before),
         .data = .{
-            .sys = .{ .system = &Dummy },
+            .sys = .{ .args = .fromSlice(null), .system = &Dummy },
         },
     });
     defer {
@@ -733,7 +734,7 @@ test "Sys: cyclic dependency" {
         .before = .fromSlice(&sys_2_before),
         .after = .fromSlice(&sys_2_after),
         .data = .{
-            .sys = .{ .system = &Dummy },
+            .sys = .{ .args = .fromSlice(null), .system = &Dummy },
         },
     });
     try std.testing.expectError(error.OperationFailed, result);

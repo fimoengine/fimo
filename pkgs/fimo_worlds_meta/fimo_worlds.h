@@ -63,10 +63,8 @@ typedef struct FWRLD_SysArgs {
     /// Arena whose lifetime matches the execution of all systems
     /// in the current scheduler.
     FSTD_Arena *arena;
-    /// Slice of requested resources with read permission.
-    FSTD_SliceConst(void *) read;
-    /// Slice of requested resources with write permission.
-    FSTD_SliceConst(void *) write;
+    /// Slice of requested resources.
+    FSTD_SliceConst(void *) resources;
 } FWRLD_SysArgs;
 
 /// Function that will be called when a scheduler runs a system.
@@ -90,11 +88,23 @@ enum {
     FWRLD__SysDescTag_ = FSTD_I32_MAX,
 };
 
+typedef FSTD_I32 FWRLD_SysArgTag;
+enum {
+    FWRLD_SysArgTag_ReadResource = (FWRLD_SysArgTag)0,
+    FWRLD_SysArgTag_WriteResource = (FWRLD_SysArgTag)1,
+    FWRLD__SysArgTag_ = FSTD_I32_MAX,
+};
+
+typedef struct {
+    FWRLD_SysArgTag tag;
+    union {
+        FWRLD_Res *resource;
+    };
+} FWRLD_SysArg;
+
 typedef struct FWRLD_SysCondDesc {
-    /// List of required resrources with read access.
-    FSTD_SliceConst(FWRLD_Res) read;
-    /// List of required resrources with write access.
-    FSTD_SliceConst(FWRLD_Res) write;
+    /// List of required arguments.
+    FSTD_SliceConst(FWRLD_SysArg) args;
     /// Data to pass to the condition function.
     void *FSTD_MAYBE_NULL data;
     /// Condition function to invoke.
@@ -122,10 +132,8 @@ typedef struct FWRLD_SysDesc {
         struct {
             /// Optional label of the system.
             FSTD_StrConst label;
-            /// List of required resrources with read access.
-            FSTD_SliceConst(FWRLD_Res) read;
-            /// List of required resrources with write access.
-            FSTD_SliceConst(FWRLD_Res) write;
+            /// List of required arguments.
+            FSTD_SliceConst(FWRLD_SysArg) args;
             /// Data to pass to the system function.
             void *FSTD_MAYBE_NULL data;
             /// System function to invoke.
@@ -288,8 +296,15 @@ namespace fworlds {
     struct World {
         FWRLD_World handle;
 
+        constexpr World() noexcept = default;
+        constexpr explicit World(const FWRLD_World &other) noexcept : handle(other) {};
+        constexpr World(const World &other) noexcept = default;
+        constexpr World(World &&other) noexcept = default;
+        constexpr World &operator=(const World &other) noexcept = default;
+        constexpr World &operator=(World &&other) noexcept = default;
+
         /// Initializes a new empty world.
-        static inline auto init(const WorldDesc &desc) noexcept -> std::expected<World, fstd::Status> {
+        static auto init(const WorldDesc &desc) noexcept -> std::expected<World, fstd::Status> {
             World world{};
             FWRLD_WorldDesc d{.label = desc.label};
             auto status = fwrld_world_init(&world.handle, &d);
@@ -299,7 +314,7 @@ namespace fworlds {
         }
 
         /// Deinitializes an empty world.
-        inline auto deinit() const noexcept -> void {
+        auto deinit() const noexcept -> void {
             if (this->handle)
                 fwrld_world_deinit(this->handle);
         }
@@ -307,11 +322,11 @@ namespace fworlds {
         /// Adds a new resource to the world.
         template<typename T>
         [[nodiscard]]
-        inline auto add_res(const ResDesc<T> &desc) const noexcept -> Res<T>;
+        auto add_res(const ResDesc<T> &desc) const noexcept -> Res<T>;
 
         /// Adds an empty scheduler to the world.
         [[nodiscard]]
-        inline auto add_scheduler(const SchedulerDesc &desc) const noexcept -> Scheduler;
+        auto add_scheduler(const SchedulerDesc &desc) const noexcept -> Scheduler;
     };
 
     /// Descriptor for a resource.
@@ -330,32 +345,38 @@ namespace fworlds {
     struct Res {
         FWRLD_Res handle;
 
-        inline constexpr operator Res<void>() noexcept { return {this->handle}; }
+        constexpr Res() noexcept = default;
+        constexpr explicit Res(const FWRLD_Res &other) noexcept : handle(other) {};
+        constexpr Res(const Res &other) noexcept = default;
+        constexpr Res(Res &&other) noexcept = default;
+        constexpr Res &operator=(const Res &other) noexcept = default;
+        constexpr Res &operator=(Res &&other) noexcept = default;
+        constexpr operator Res<void>() noexcept { return Res{this->handle}; }
 
         /// Invalidates the resource.
         ///
         /// The resource may not be in use.
-        inline auto deinit() const noexcept -> void;
+        auto deinit() const noexcept -> void;
 
         /// Acquires the resource with read access.
         ///
         /// __NOTE__: This may inhibit the scheduling of systems, as it is a valid implementation
         /// strategy to acquire all necessary resources before executing any system.
         [[nodiscard("the resource must be unlocked")]]
-        inline auto lock_read() const noexcept -> T *;
+        auto lock_read() const noexcept -> T *;
 
         /// Unlocks a resource acquired with read access.
-        inline auto unlock_read() const noexcept -> void;
+        auto unlock_read() const noexcept -> void;
 
         /// Acquires the resource with write access.
         ///
         /// __NOTE__: This may inhibit the scheduling of systems, as it is a valid implementation
         /// strategy to acquire all necessary resources before executing any system.
         [[nodiscard("the resource must be unlocked")]]
-        inline auto lock_write() const noexcept -> T *;
+        auto lock_write() const noexcept -> T *;
 
         /// Unlocks a resource acquired with write access.
-        inline auto unlock_write() const noexcept -> void;
+        auto unlock_write() const noexcept -> void;
     };
 
     /// Descriptor for a resource.
@@ -377,31 +398,541 @@ namespace fworlds {
     struct Scheduler {
         FWRLD_Scheduler handle;
 
+        constexpr Scheduler() noexcept = default;
+        constexpr explicit Scheduler(const FWRLD_Scheduler &other) noexcept : handle(other) {};
+        constexpr Scheduler(const Scheduler &other) noexcept = default;
+        constexpr Scheduler(Scheduler &&other) noexcept = default;
+        constexpr Scheduler &operator=(const Scheduler &other) noexcept = default;
+        constexpr Scheduler &operator=(Scheduler &&other) noexcept = default;
+
         /// Deinitializes an empty world.
-        inline auto deinit() const noexcept -> void {
+        auto deinit() const noexcept -> void {
             if (this->handle)
                 fwrld_scheduler_deinit(this->handle);
         }
 
         /// Adds a system(-set) to the scheduler.
         [[nodiscard]]
-        inline auto add_sys(const SysDesc &desc) const noexcept -> std::expected<Sys, fstd::Status>;
+        auto add_sys(const SysDesc &desc) const noexcept -> std::expected<Sys, fstd::Status>;
 
         /// Starts a new run of the systems, blocking the current thread until it completes.
-        inline auto run(fstd::Arena &arena) const noexcept -> void { fwrld_scheduler_run(this->handle, &arena); }
+        auto run(fstd::Arena &arena) const noexcept -> void { fwrld_scheduler_run(this->handle, &arena); }
 
         /// Schedules the systems of the scheduler to be run asynchronously.
         ///
         /// Multiple concurrent schedule operations are serialized. The arena must remain valid until `completion` is
         /// signaled. The systems will start running after `start` is signaled. If no executor is associated with the
         /// scheduler, this operation will block the calling thread until all systems are run.
-        inline auto schedule(fstd::Arena &arena, FTSK_Fence *FSTD_MAYBE_NULL start,
-                             FTSK_Fence *FSTD_MAYBE_NULL completion) const noexcept -> void {
+        auto schedule(fstd::Arena &arena, FTSK_Fence *FSTD_MAYBE_NULL start,
+                      FTSK_Fence *FSTD_MAYBE_NULL completion) const noexcept -> void {
             fwrld_scheduler_schedule(this->handle, &arena, start, completion);
         }
 
         /// Blocks the calling thread until all scheduled operations are completed.
-        inline auto flush() const noexcept -> void { fwrld_scheduler_flush(this->handle); }
+        auto flush() const noexcept -> void { fwrld_scheduler_flush(this->handle); }
+    };
+
+    namespace detail {
+        struct Arg {
+            // NOLINTNEXTLINE(performance-enum-size)
+            enum class Tag : fstd::i32 {
+                ReadResource = FWRLD_SysArgTag_ReadResource,
+                WriteResource = FWRLD_SysArgTag_WriteResource,
+            };
+            union {
+                Res<void> resource;
+            };
+        };
+    } // namespace detail
+
+    template<typename T>
+    struct ReadResouceArg {
+        detail::Arg::Tag tag;
+        Res<T> resource;
+
+        constexpr ReadResouceArg(const Res<T> &other) noexcept :
+            tag(detail::Arg::Tag::ReadResource), resource(other) {};
+        constexpr ReadResouceArg(const ReadResouceArg &other) noexcept = default;
+        constexpr ReadResouceArg(ReadResouceArg &&other) noexcept = default;
+        constexpr ReadResouceArg &operator=(const ReadResouceArg &other) noexcept = default;
+        constexpr ReadResouceArg &operator=(ReadResouceArg &&other) noexcept = default;
+    };
+
+    template<typename T>
+    struct WriteResouceArg {
+        detail::Arg::Tag tag;
+        Res<T> resource;
+
+        constexpr WriteResouceArg(const Res<T> &other) noexcept :
+            tag(detail::Arg::Tag::WriteResource), resource(other) {};
+        constexpr WriteResouceArg(const WriteResouceArg &other) noexcept = default;
+        constexpr WriteResouceArg(WriteResouceArg &&other) noexcept = default;
+        constexpr WriteResouceArg &operator=(const WriteResouceArg &other) noexcept = default;
+        constexpr WriteResouceArg &operator=(WriteResouceArg &&other) noexcept = default;
+    };
+
+    template<typename T>
+    struct Read {
+        T *ptr;
+
+        constexpr explicit Read(T *other) noexcept : ptr(other) {};
+        constexpr Read(const Read &other) noexcept = default;
+        constexpr Read(Read &&other) noexcept = default;
+        constexpr Read &operator=(const Read &other) noexcept = default;
+        constexpr Read &operator=(Read &&other) noexcept = default;
+        constexpr T &operator*() const noexcept { return *ptr; }
+        constexpr T *operator->() const noexcept { return ptr; }
+    };
+
+    template<typename T>
+    struct Write {
+        T *ptr;
+
+        constexpr explicit Write(T *other) noexcept : ptr(other) {};
+        constexpr Write(const Write &other) noexcept = default;
+        constexpr Write(Write &&other) noexcept = default;
+        constexpr Write &operator=(const Write &other) noexcept = default;
+        constexpr Write &operator=(Write &&other) noexcept = default;
+        constexpr T &operator*() const noexcept { return *ptr; }
+        constexpr T *operator->() const noexcept { return ptr; }
+    };
+
+    namespace detail {
+        template<typename T>
+        struct IsConstValue : fstd::ConstexprValue<false> {};
+        template<auto V>
+        struct IsConstValue<fstd::ConstexprValue<V>> : fstd::ConstexprValue<true> {};
+
+        template<typename T, typename... Ts>
+        struct IsContained;
+        template<typename T, typename Head, typename... Rest>
+        struct IsContained<T, Head, Rest...>
+            : fstd::ConstexprValue<std::is_same_v<T, Head> or IsContained<T, Rest...>::Value> {};
+        template<typename T>
+        struct IsContained<T> : fstd::ConstexprValue<false> {};
+
+        template<typename... Ts>
+        struct IsUnique;
+        template<typename Head, typename... Rest>
+        struct IsUnique<Head, Rest...>
+            : fstd::ConstexprValue<!IsContained<Head, Rest...>::Value and IsUnique<Rest...>::Value> {};
+        template<>
+        struct IsUnique<> : fstd::ConstexprValue<true> {};
+
+        template<typename T>
+        struct IsArg : fstd::ConstexprValue<false> {};
+        template<>
+        struct IsArg<World> : fstd::ConstexprValue<true> {
+            constexpr static bool IsExplicit = false;
+        };
+        template<>
+        struct IsArg<Scheduler> : fstd::ConstexprValue<true> {
+            constexpr static bool IsExplicit = false;
+        };
+        template<>
+        struct IsArg<fstd::Arena &> : fstd::ConstexprValue<true> {
+            constexpr static bool IsExplicit = false;
+        };
+        template<typename T>
+        struct IsArg<Read<T>> : fstd::ConstexprValue<true> {
+            using Arg = ReadResouceArg<T>;
+            constexpr static bool IsExplicit = true;
+        };
+        template<typename T>
+        struct IsArg<Write<T>> : fstd::ConstexprValue<true> {
+            using Arg = WriteResouceArg<T>;
+            constexpr static bool IsExplicit = true;
+        };
+
+        template<typename T>
+        struct IsArgList;
+        template<typename Head, typename... Rest>
+        struct IsArgList<fstd::Tuple<Head, Rest...>>
+            : fstd::ConstexprValue<IsArg<Head>::Value and IsUnique<Head, Rest...>::Value and
+                                   IsArgList<fstd::Tuple<Rest...>>::Value> {};
+        template<>
+        struct IsArgList<fstd::Tuple<>> : fstd::ConstexprValue<true> {};
+
+        template<typename T>
+        struct FunctionArgs;
+        template<typename Ret, typename... Args>
+        struct FunctionArgs<Ret (*)(Args...)> {
+            using StaticType = Ret (*)(Args...);
+            using ReturnType = Ret;
+            using ArgsType = fstd::Tuple<Args...>;
+        };
+        template<typename Ret, typename T, typename... Args>
+        struct FunctionArgs<Ret (T::*)(Args...)> {
+            using StaticType = Ret (*)(Args...);
+            using ReturnType = Ret;
+            using ArgsType = fstd::Tuple<Args...>;
+        };
+        template<typename Ret, typename T, typename... Args>
+        struct FunctionArgs<Ret (T::*)(Args...) const> {
+            using StaticType = Ret (*)(Args...);
+            using ReturnType = Ret;
+            using ArgsType = fstd::Tuple<Args...>;
+        };
+
+        template<typename T>
+        struct CallableInfo;
+        template<typename Ret, typename... Args_>
+        struct CallableInfo<Ret (*)(Args_...)> {
+            using Type = Ret (*)(Args_...);
+            using StaticType = FunctionArgs<Type>::StaticType;
+            using Return = FunctionArgs<Type>::ReturnType;
+            using Args = FunctionArgs<Type>::ArgsType;
+        };
+        template<typename T>
+            requires(!std::is_function_v<T>)
+        struct CallableInfo<T> {
+            using Type = decltype(&T::operator());
+            using StaticType = FunctionArgs<Type>::StaticType;
+            using Return = FunctionArgs<Type>::ReturnType;
+            using Args = FunctionArgs<Type>::ArgsType;
+        };
+
+        template<typename T>
+        struct ArgTuple {
+            using Type = fstd::Tuple<>;
+        };
+        template<typename T>
+            requires IsArg<T>::IsExplicit
+        struct ArgTuple<T> {
+            using Type = fstd::Tuple<typename IsArg<T>::Arg>;
+        };
+
+        template<typename T>
+        struct CollectArgs;
+
+        template<typename... Args>
+        struct CollectArgs<fstd::Tuple<Args...>> {
+            using Type = decltype(fstd::concatTuple(std::declval<typename ArgTuple<Args>::Type>()...));
+        };
+
+        template<typename T>
+            requires IsArgList<typename FunctionArgs<T>::ArgsType>::Value
+        struct ArgsTuple {
+            using Type = CollectArgs<typename FunctionArgs<T>::ArgsType>::Type;
+            template<fstd::usize... I, typename... Ts>
+            constexpr static Type makeArgs(fstd::Tuple<Ts...> &&tuple, std::index_sequence<I...>) noexcept {
+                return fstd::makeTuple(std::forward<Ts>(fstd::get<I>(std::forward<decltype(tuple)>(tuple)))...);
+            }
+            template<typename... Ts>
+            constexpr static Type makeArgs(fstd::Tuple<Ts...> &&tuple) noexcept {
+                return makeArgs(std::forward<decltype(tuple)>(tuple), std::make_index_sequence<sizeof...(Ts)>{});
+            }
+        };
+
+        static_assert(std::is_same_v<ArgsTuple<void (*)()>::Type, fstd::Tuple<>>);
+        static_assert(std::is_same_v<ArgsTuple<void (*)(World)>::Type, fstd::Tuple<>>);
+        static_assert(std::is_same_v<ArgsTuple<void (*)(Scheduler)>::Type, fstd::Tuple<>>);
+        static_assert(std::is_same_v<ArgsTuple<void (*)(fstd::Arena &)>::Type, fstd::Tuple<>>);
+        static_assert(std::is_same_v<ArgsTuple<void (*)(Read<int>)>::Type, fstd::Tuple<ReadResouceArg<int>>>);
+        static_assert(std::is_same_v<ArgsTuple<void (*)(Write<int>)>::Type, fstd::Tuple<WriteResouceArg<int>>>);
+        static_assert(std::is_same_v<
+                      ArgsTuple<void (*)(World, Scheduler, fstd::Arena &, Read<int>, Read<float>, Write<int>)>::Type,
+                      fstd::Tuple<ReadResouceArg<int>, ReadResouceArg<float>, WriteResouceArg<int>>>);
+
+        template<typename T, fstd::usize ResIdx>
+            requires IsArg<T>::Value
+        struct UnpackArgHelper;
+        template<fstd::usize ResIdx>
+        struct UnpackArgHelper<World, ResIdx> {
+            constexpr static fstd::usize NextResIdx = ResIdx;
+            constexpr static World get(const FWRLD_SysArgs *args) noexcept { return World{args->world}; }
+        };
+        template<fstd::usize ResIdx>
+        struct UnpackArgHelper<Scheduler, ResIdx> {
+            constexpr static fstd::usize NextResIdx = ResIdx;
+            constexpr static Scheduler get(const FWRLD_SysArgs *args) noexcept { return Scheduler{args->sched}; }
+        };
+        template<fstd::usize ResIdx>
+        struct UnpackArgHelper<fstd::Arena &, ResIdx> {
+            constexpr static fstd::usize NextResIdx = ResIdx;
+            constexpr static fstd::Arena &get(const FWRLD_SysArgs *args) noexcept {
+                return *static_cast<fstd::Arena *>(args->arena);
+            }
+        };
+        template<typename T, fstd::usize ResIdx>
+        struct UnpackArgHelper<Read<T>, ResIdx> {
+            constexpr static fstd::usize NextResIdx = ResIdx + 1;
+            constexpr static Read<T> get(const FWRLD_SysArgs *args) noexcept {
+                return Read<T>{static_cast<T *>(const_cast<void *>(args->resources.ptr[ResIdx]))};
+            }
+        };
+        template<typename T, fstd::usize ResIdx>
+        struct UnpackArgHelper<Write<T>, ResIdx> {
+            constexpr static fstd::usize NextResIdx = ResIdx + 1;
+            constexpr static Write<T> get(const FWRLD_SysArgs *args) noexcept {
+                return Write<T>{static_cast<T *>(const_cast<void *>(args->resources.ptr[ResIdx]))};
+            }
+        };
+
+        template<typename Tuple, fstd::usize ResIdx, typename Args>
+            requires IsArgList<Args>::Value
+        struct UnpackArgsCollector;
+        template<typename Tuple, fstd::usize ResIdx, typename Head, typename... Rest>
+        struct UnpackArgsCollector<Tuple, ResIdx, fstd::Tuple<Head, Rest...>> {
+            using Helper = UnpackArgHelper<Head, ResIdx>;
+            using ConcatTuple = decltype(fstd::concatTuple(std::declval<Tuple>(), std::declval<fstd::Tuple<Helper>>()));
+            using Type = typename UnpackArgsCollector<ConcatTuple, Helper::NextResIdx, fstd::Tuple<Rest...>>::Type;
+        };
+        template<typename Tuple, fstd::usize ResIdx>
+        struct UnpackArgsCollector<Tuple, ResIdx, fstd::Tuple<>> {
+            using Type = Tuple;
+        };
+
+        template<typename Tuple>
+        struct UnpackArgsImpl;
+        template<typename... Ts>
+        struct UnpackArgsImpl<fstd::Tuple<Ts...>> {
+            constexpr static std::tuple<decltype(Ts::get(nullptr))...> get(const FWRLD_SysArgs *args) noexcept {
+                return std::tuple<decltype(Ts::get(nullptr))...>(Ts::get(args)...);
+            }
+        };
+
+        template<typename F>
+        struct UnpackArgsHelper {
+            using Collector = UnpackArgsCollector<fstd::Tuple<>, 0, typename CallableInfo<F>::Args>;
+            using Impl = UnpackArgsImpl<typename Collector::Type>;
+            using Return = decltype(Impl::get(nullptr));
+            constexpr static Return get(const FWRLD_SysArgs *args) noexcept { return Impl::get(args); }
+        };
+        static_assert(std::is_same_v<UnpackArgsHelper<void (*)()>::Return, std::tuple<>>);
+        static_assert(std::is_same_v<UnpackArgsHelper<void (*)(World)>::Return, std::tuple<World>>);
+        static_assert(std::is_same_v<UnpackArgsHelper<void (*)(Scheduler)>::Return, std::tuple<Scheduler>>);
+        static_assert(std::is_same_v<UnpackArgsHelper<void (*)(fstd::Arena &)>::Return, std::tuple<fstd::Arena &>>);
+        static_assert(std::is_same_v<UnpackArgsHelper<void (*)(Read<int>)>::Return, std::tuple<Read<int>>>);
+        static_assert(std::is_same_v<UnpackArgsHelper<void (*)(Write<int>)>::Return, std::tuple<Write<int>>>);
+        static_assert(std::is_same_v<UnpackArgsHelper<void (*)(World, Scheduler, fstd::Arena &, Read<int>, Read<float>,
+                                                               Write<int>)>::Return,
+                                     std::tuple<World, Scheduler, fstd::Arena &, Read<int>, Read<float>, Write<int>>>);
+
+        template<typename F>
+        constexpr static typename UnpackArgsHelper<F>::Return makeArgsTuple(const FWRLD_SysArgs *args) {
+            return UnpackArgsHelper<F>::get(args);
+        }
+
+        struct Condition {
+            fstd::Slice<const Arg> args;
+            void *context;
+            FWRLD_SysCond condition;
+
+            constexpr Condition(fstd::Slice<const Arg> args, void *context, FWRLD_SysCond condition) noexcept :
+                args(args), context(context), condition(condition) {}
+            template<typename F>
+                requires(!IsConstValue<F>::Value)
+            constexpr Condition(const ArgsTuple<typename CallableInfo<F>::Type>::Type &args, F f) noexcept {
+                this->args = {reinterpret_cast<const Arg *>(&args),
+                              fstd::TupleSizeV<std::remove_cvref_t<decltype(args)>>};
+                static_assert(std::is_convertible_v<F, typename CallableInfo<F>::StaticType>);
+                using StaticType = typename CallableInfo<F>::StaticType;
+                StaticType cf = f;
+                this->context = const_cast<void *>(reinterpret_cast<const void *>(f));
+                this->condition = [](void *ctx, const FWRLD_SysArgs *args) -> bool {
+                    StaticType f = reinterpret_cast<StaticType>(const_cast<const void *>(ctx));
+                    return std::apply(f, makeArgsTuple<F>(args));
+                };
+            };
+            template<typename F>
+                requires(!IsConstValue<F>::Value)
+            constexpr Condition(const ArgsTuple<typename CallableInfo<F>::Type>::Type &args, F &f) noexcept {
+                this->args = {reinterpret_cast<const Arg *>(&args),
+                              fstd::TupleSizeV<std::remove_cvref_t<decltype(args)>>};
+                if constexpr (std::is_convertible_v<F, typename CallableInfo<F>::StaticType>) {
+                    using StaticType = typename CallableInfo<F>::StaticType;
+                    StaticType cf = f;
+                    this->context = const_cast<void *>(reinterpret_cast<const void *>(f));
+                    this->condition = [](void *ctx, const FWRLD_SysArgs *args) -> bool {
+                        StaticType f = reinterpret_cast<StaticType>(const_cast<const void *>(ctx));
+                        return std::apply(f, makeArgsTuple<F>(args));
+                    };
+                }
+                else {
+                    this->context = const_cast<std::remove_cvref_t<F> *>(&f);
+                    this->condition = [](void *ctx, const FWRLD_SysArgs *args) -> bool {
+                        F &f = *static_cast<F *>(ctx);
+                        return std::apply(f, makeArgsTuple<F>(args));
+                    };
+                }
+            };
+            template<typename F, F f>
+            constexpr Condition(const ArgsTuple<typename CallableInfo<F>::Type>::Type &args,
+                                fstd::ConstexprValue<f>) noexcept {
+                this->args = {reinterpret_cast<const Arg *>(&args),
+                              fstd::TupleSizeV<std::remove_cvref_t<decltype(args)>>};
+                this->context = nullptr;
+                this->condition = [](void *, const FWRLD_SysArgs *args) -> bool {
+                    return std::apply(f, makeArgsTuple<F>(args));
+                };
+            };
+            constexpr Condition(const Condition &) noexcept = default;
+            constexpr Condition(Condition &&) noexcept = default;
+            constexpr Condition &operator=(const Condition &) noexcept = default;
+            constexpr Condition &operator=(Condition &&) noexcept = default;
+        };
+
+        struct System {
+            fstd::StrConst label;
+            fstd::Slice<const Arg> args;
+            void *context;
+            FWRLD_SysRun run;
+
+            constexpr System(fstd::Slice<const Arg> args, void *context, FWRLD_SysRun run) noexcept :
+                System({}, args, context, run) {}
+            constexpr System(fstd::StrConst label, fstd::Slice<const Arg> args, void *context,
+                             FWRLD_SysRun run) noexcept : label(label), args(args), context(context), run(run) {}
+            template<typename F>
+                requires(!IsConstValue<F>::Value)
+            constexpr System(const ArgsTuple<typename CallableInfo<F>::Type>::Type &args, F f) noexcept :
+                System({}, args, f) {}
+            template<typename F>
+                requires(!IsConstValue<F>::Value)
+            constexpr System(fstd::StrConst label, const ArgsTuple<typename CallableInfo<F>::Type>::Type &args,
+                             F f) noexcept : label(label) {
+                static_assert(std::is_same_v<void, typename CallableInfo<F>::Return> or
+                              std::is_same_v<FTSK_Fence *, typename CallableInfo<F>::Return>);
+                this->args = {reinterpret_cast<const Arg *>(&args),
+                              fstd::TupleSizeV<std::remove_cvref_t<decltype(args)>>};
+                static_assert(std::is_convertible_v<F, typename CallableInfo<F>::StaticType>);
+                using StaticType = typename CallableInfo<F>::StaticType;
+                StaticType cf = f;
+                this->context = const_cast<void *>(reinterpret_cast<const void *>(cf));
+                this->run = [](void *ctx, const FWRLD_SysArgs *args) -> FTSK_Fence * {
+                    StaticType f = reinterpret_cast<StaticType>(ctx);
+                    if constexpr (std::is_same_v<void, typename CallableInfo<F>::Return>) {
+                        std::apply(f, makeArgsTuple<F>(args));
+                        return nullptr;
+                    }
+                    else {
+                        return std::apply(f, makeArgsTuple<F>(args));
+                    }
+                };
+            }
+            template<typename F>
+                requires(!IsConstValue<F>::Value)
+            constexpr System(const ArgsTuple<typename CallableInfo<F>::Type>::Type &args, F &f) noexcept :
+                System({}, args, f) {}
+            template<typename F>
+                requires(!IsConstValue<F>::Value)
+            constexpr System(fstd::StrConst label, const ArgsTuple<typename CallableInfo<F>::Type>::Type &args,
+                             F &f) noexcept : label(label) {
+                static_assert(std::is_same_v<void, typename CallableInfo<F>::Return> or
+                              std::is_same_v<FTSK_Fence *, typename CallableInfo<F>::Return>);
+                this->args = {reinterpret_cast<const Arg *>(&args),
+                              fstd::TupleSizeV<std::remove_cvref_t<decltype(args)>>};
+                if constexpr (std::is_convertible_v<F, typename CallableInfo<F>::StaticType>) {
+                    using StaticType = typename CallableInfo<F>::StaticType;
+                    StaticType cf = f;
+                    this->context = const_cast<void *>(reinterpret_cast<const void *>(cf));
+                    this->run = [](void *ctx, const FWRLD_SysArgs *args) -> FTSK_Fence * {
+                        StaticType f = reinterpret_cast<StaticType>(const_cast<const void *>(ctx));
+                        if constexpr (std::is_same_v<void, typename CallableInfo<F>::Return>) {
+                            std::apply(f, makeArgsTuple<F>(args));
+                            return nullptr;
+                        }
+                        else {
+                            return std::apply(f, makeArgsTuple<F>(args));
+                        }
+                    };
+                }
+                else {
+                    this->context = const_cast<std::remove_cvref_t<F> *>(&f);
+                    this->run = [](void *ctx, const FWRLD_SysArgs *args) -> FTSK_Fence * {
+                        F &f = *static_cast<F *>(ctx);
+                        if constexpr (std::is_same_v<void, typename CallableInfo<F>::Return>) {
+                            std::apply(f, makeArgsTuple<F>(args));
+                            return nullptr;
+                        }
+                        else {
+                            return std::apply(f, makeArgsTuple<F>(args));
+                        }
+                    };
+                }
+            }
+            template<auto f>
+            constexpr System(const ArgsTuple<typename CallableInfo<decltype(f)>::Type>::Type &args,
+                             fstd::ConstexprValue<f> v) noexcept : System({}, args, v) {}
+            template<auto f>
+            constexpr System(fstd::StrConst label,
+                             const ArgsTuple<typename CallableInfo<decltype(f)>::Type>::Type &args,
+                             fstd::ConstexprValue<f>) noexcept : label(label) {
+                static_assert(std::is_same_v<void, typename CallableInfo<decltype(f)>::Return> or
+                              std::is_same_v<FTSK_Fence *, typename CallableInfo<decltype(f)>::Return>);
+                this->args = {reinterpret_cast<const Arg *>(&args),
+                              fstd::TupleSizeV<std::remove_cvref_t<decltype(args)>>};
+                this->context = nullptr;
+                this->run = [](void *, const FWRLD_SysArgs *args) -> FTSK_Fence * {
+                    if constexpr (std::is_same_v<void, typename CallableInfo<decltype(f)>::Return>) {
+                        std::apply(f, makeArgsTuple<decltype(f)>(args));
+                        return nullptr;
+                    }
+                    else {
+                        return std::apply(f, makeArgsTuple<decltype(f)>(args));
+                    }
+                };
+            }
+            constexpr System(const System &) noexcept = default;
+            constexpr System(System &&) noexcept = default;
+            constexpr System &operator=(const System &) noexcept = default;
+            constexpr System &operator=(System &&) noexcept = default;
+        };
+
+        struct SubSet {
+            bool serialize;
+            fstd::Slice<const SysDesc> sub_desc;
+
+            constexpr SubSet(fstd::Slice<const SysDesc> sub_desc) noexcept : serialize(false), sub_desc(sub_desc) {}
+            constexpr SubSet(bool serialize, fstd::Slice<const SysDesc> sub_desc) noexcept :
+                serialize(serialize), sub_desc(sub_desc) {}
+            constexpr SubSet(const SubSet &other) noexcept = default;
+            constexpr SubSet(SubSet &&other) noexcept = default;
+
+            constexpr SubSet &operator=(const SubSet &other) noexcept = default;
+            constexpr SubSet &operator=(SubSet &&other) noexcept = default;
+        };
+    } // namespace detail
+
+    /// Description of a system(-set).
+    struct SysDesc {
+        // NOLINTNEXTLINE(performance-enum-size)
+        enum class Tag : fstd::i32 { Sys = FWRLD_SysDescTag_Sys, Set = FWRLD_SysDescTag_Set };
+        template<typename F>
+        using ArgsTuple = detail::ArgsTuple<F>::Type;
+        using Condition = detail::Condition;
+        using System = detail::System;
+        using SubSet = detail::SubSet;
+
+        Tag tag;
+        fstd::Slice<const Sys> before;
+        fstd::Slice<const Sys> after;
+        fstd::Slice<const Condition> conditions;
+        union {
+            System sys;
+            SubSet set;
+        };
+
+        constexpr SysDesc(System sys) noexcept : SysDesc({}, {}, {}, sys) {}
+        constexpr SysDesc(fstd::Slice<const Condition> conditions, System sys) noexcept :
+            SysDesc({}, {}, conditions, sys) {}
+        constexpr SysDesc(fstd::Slice<const Sys> before, fstd::Slice<const Sys> after, System sys) noexcept :
+            SysDesc(before, after, {}, sys) {}
+        constexpr SysDesc(fstd::Slice<const Sys> before, fstd::Slice<const Sys> after,
+                          fstd::Slice<const Condition> conditions, System sys) noexcept :
+            tag(Tag::Sys), before(before), after(after), conditions(conditions), sys(sys) {}
+        constexpr SysDesc(SubSet set) noexcept : SysDesc({}, {}, {}, set) {}
+        constexpr SysDesc(fstd::Slice<const Condition> conditions, SubSet set) noexcept :
+            SysDesc({}, {}, conditions, set) {}
+        constexpr SysDesc(fstd::Slice<const Sys> before, fstd::Slice<const Sys> after, SubSet set) noexcept :
+            SysDesc(before, after, {}, set) {}
+        constexpr SysDesc(fstd::Slice<const Sys> before, fstd::Slice<const Sys> after,
+                          fstd::Slice<const Condition> conditions, SubSet set) noexcept :
+            tag(Tag::Sys), before(before), after(after), conditions(conditions), set(set) {}
+        constexpr SysDesc(const SysDesc &other) noexcept = default;
+        constexpr SysDesc(SysDesc &&other) noexcept = default;
+        constexpr SysDesc &operator=(const SysDesc &other) noexcept = default;
+        constexpr SysDesc &operator=(SysDesc &&other) noexcept = default;
     };
 
     /// A handle to a registered system(-set).
@@ -415,128 +946,12 @@ namespace fworlds {
         /// The handle is invalidated after calling this function.
         /// The operation signals the fence on completion.
         /// If no fence is provided, this function blocks until completion.
-        inline auto deinit(FTSK_Fence *FSTD_MAYBE_NULL fence = nullptr) const noexcept -> void {
+        auto deinit(FTSK_Fence *FSTD_MAYBE_NULL fence = nullptr) const noexcept -> void {
             if (this->handle)
                 fwrld_sys_deinit(this->handle, fence);
             else if (fence)
                 ftsk_fence_signal(fence);
         }
-    };
-
-    /// Arguments passed to a system function.
-    ///
-    /// Should not be copied, as it may be extended in the future.
-    template<typename Read, typename Write>
-    struct SysArgs {
-        World world;
-        Scheduler sched;
-        fstd::Arena &arena;
-        Read read;
-        Write write;
-    };
-
-    template<typename... Ts>
-    struct ResList {
-        std::array<Res<void>, sizeof...(Ts)> list;
-
-        ResList(Res<Ts>... args) noexcept : list{args.handle...} {}
-        inline operator fstd::Slice<const Res<void>>() const noexcept { return this->list; }
-    };
-
-    template<typename... Ts>
-    struct ResArgs {
-        fstd::Slice<const void *> list;
-
-        template<fstd::usize Index>
-        inline auto get() const noexcept -> std::tuple_element_t<Index, std::tuple<Ts...>> & {
-            using T = std::tuple_element_t<Index, std::tuple<Ts...>>;
-            return *static_cast<T *>((const_cast<void *>(this->list[Index])));
-        }
-    };
-
-    struct CondDesc {
-        fstd::Slice<const Res<void>> read;
-        fstd::Slice<const Res<void>> write;
-        void *FSTD_MAYBE_NULL data;
-        FWRLD_SysCond condition;
-
-
-        template<typename... Read, typename... Write, typename F>
-        static inline constexpr auto init(fstd::Slice<const char> label, const ResList<Read...> &read,
-                                          const ResList<Write...> &write, F) noexcept -> CondDesc {
-            return {
-                    .label = label,
-                    .read = read,
-                    .write = write,
-                    .data = nullptr,
-                    .system = +[](void *, const FWRLD_SysArgs *args) -> bool {
-                        const SysArgs<ResArgs<Read...>, ResArgs<Write...>> args2 = {
-                                .world = {args->world},
-                                .sched = {args->sched},
-                                .arena = *static_cast<fstd::Arena *>(args->arena),
-                                .read = {.list = {args->read.ptr, args->read.len}},
-                                .write = {.list = {args->write.ptr, args->write.len}},
-                        };
-                        return std::invoke_r<bool>(F{}, args2);
-                    },
-            };
-        }
-    };
-
-    struct SysDescSys {
-        fstd::Slice<const char> label;
-        fstd::Slice<const Res<void>> read;
-        fstd::Slice<const Res<void>> write;
-        void *FSTD_MAYBE_NULL data;
-        FWRLD_SysRun system;
-
-        template<typename... Read, typename... Write, typename F>
-        static inline constexpr auto init(fstd::Slice<const char> label, const ResList<Read...> &read,
-                                          const ResList<Write...> &write, F) noexcept -> SysDescSys {
-            return {
-                    .label = label,
-                    .read = read,
-                    .write = write,
-                    .data = nullptr,
-                    .system = +[](void *, const FWRLD_SysArgs *args) -> FTSK_Fence *FSTD_MAYBE_NULL {
-                        const SysArgs<ResArgs<Read...>, ResArgs<Write...>> args2 = {
-                                .world = {args->world},
-                                .sched = {args->sched},
-                                .arena = *static_cast<fstd::Arena *>(args->arena),
-                                .read = {.list = {args->read.ptr, args->read.len}},
-                                .write = {.list = {args->write.ptr, args->write.len}},
-                        };
-                        using Ret = decltype((F{})(args2));
-                        if constexpr (std::is_same_v<Ret, void>) {
-                            std::invoke_r<void>(F{}, args2);
-                            return nullptr;
-                        }
-                        else {
-                            return std::invoke_r<FTSK_Fence * FSTD_MAYBE_NULL>(F{}, args2);
-                        }
-                    },
-            };
-        }
-    };
-
-    struct SysDescSet {
-        bool serialize;
-        fstd::Slice<const SysDesc> sub_desc;
-    };
-
-    /// Description of a system(-set).
-    struct SysDesc {
-        // NOLINTNEXTLINE(performance-enum-size)
-        enum class Tag : fstd::i32 { Sys = FWRLD_SysDescTag_Sys, Set = FWRLD_SysDescTag_Set };
-
-        Tag tag;
-        fstd::Slice<const Sys> before;
-        fstd::Slice<const Sys> after;
-        fstd::Slice<const CondDesc> conditions;
-        union {
-            SysDescSys sys;
-            SysDescSet set;
-        };
     };
 
     template<typename T>
@@ -571,16 +986,15 @@ namespace fworlds {
     [[nodiscard]]
     inline auto World::add_res(const ResDesc<T> &desc) const noexcept -> Res<T> {
         FWRLD_ResDesc d{.label = desc.label, .value = desc.value};
-        return {fwrld_world_add_res(this->handle, &d)};
+        return Res<T>{fwrld_world_add_res(this->handle, &d)};
     }
 
     /// Adds an empty scheduler to the world.
     [[nodiscard]]
     inline auto World::add_scheduler(const SchedulerDesc &desc) const noexcept -> Scheduler {
         FWRLD_SchedulerDesc d{.label = desc.label, .executor = desc.executor};
-        return {fwrld_world_add_scheduler(this->handle, &d)};
+        return Scheduler{fwrld_world_add_scheduler(this->handle, &d)};
     }
-
 
     [[nodiscard]]
     inline auto Scheduler::add_sys(const SysDesc &desc) const noexcept -> std::expected<Sys, fstd::Status> {
