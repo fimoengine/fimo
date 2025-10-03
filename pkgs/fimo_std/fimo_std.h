@@ -515,6 +515,23 @@ fstd_util const void *fstd__parent_of_const(const void *ptr, FSTD_USize offset) 
 #define FSTD_DEFAULT_STRUCT {0}
 #endif
 
+#ifdef __cplusplus
+/// A slice of mutable entries.
+#define FSTD_Slice(t)                                                                                                  \
+    struct FSTD_IDENT(fstd__slice_) {                                                                                  \
+        using CSliceMarker = t;                                                                                        \
+        t *FSTD_MAYBE_NULL ptr;                                                                                        \
+        FSTD_USize len;                                                                                                \
+    }
+
+/// A slice of constant entries.
+#define FSTD_SliceConst(t)                                                                                             \
+    struct FSTD_IDENT(fstd__slice_) {                                                                                  \
+        using CSliceMarker = const t;                                                                                  \
+        const t *FSTD_MAYBE_NULL ptr;                                                                                  \
+        FSTD_USize len;                                                                                                \
+    }
+#else
 /// A slice of mutable entries.
 #define FSTD_Slice(t)                                                                                                  \
     struct {                                                                                                           \
@@ -528,6 +545,7 @@ fstd_util const void *fstd__parent_of_const(const void *ptr, FSTD_USize offset) 
         const t *FSTD_MAYBE_NULL ptr;                                                                                  \
         FSTD_USize len;                                                                                                \
     }
+#endif
 
 #define FSTD_SLICE_EMPTY FSTD_DEFAULT_STRUCT
 #define FSTD_SLICE_INIT_ARRAY(arr) {.ptr = (arr), .len = (sizeof((arr)) / sizeof((arr)[0]))}
@@ -3919,24 +3937,33 @@ namespace fstd {
         using ConstReverseIterator = std::reverse_iterator<const T *>;
 
         constexpr Slice() noexcept = default;
-        // constexpr Slice(T *it) noexcept
-        //     requires std::is_same_v<std::remove_const_t<T>, char>
-        //     : ptr{it}, len{std::char_traits<std::remove_const_t<T>>::length(it)} {}
         template<typename It>
-        constexpr Slice(It first, usize count) noexcept : ptr{std::to_address(first)}, len{count} {}
+        constexpr Slice(It first, usize count) noexcept
+            requires std::is_convertible_v<std::remove_reference_t<std::iter_reference_t<It>> (*)[], ElementType (*)[]>
+            : ptr{std::to_address(first)}, len{count} {}
         template<typename It, typename End>
-        constexpr Slice(It first, End last) noexcept : ptr{std::to_address(first)}, len{last - first} {}
+        constexpr Slice(It first, End last) noexcept
+            requires std::is_convertible_v<std::remove_reference_t<std::iter_reference_t<It>> (*)[], ElementType (*)[]>
+            : ptr{std::to_address(first)}, len{last - first} {}
         template<usize N>
-        constexpr Slice(std::type_identity_t<T> (&arr)[N]) noexcept : ptr{arr}, len{N} {}
+        constexpr Slice(std::type_identity_t<T> (&arr)[N]) noexcept
+            requires std::is_convertible_v<std::remove_pointer_t<decltype(std::data(arr))> (*)[], ElementType (*)[]>
+            : ptr{arr}, len{N} {}
         template<typename U, usize N>
-        constexpr Slice(std::array<U, N> &arr) noexcept : ptr{arr.data()}, len{N} {}
+        constexpr Slice(std::array<U, N> &arr) noexcept
+            requires std::is_convertible_v<std::remove_pointer_t<decltype(std::data(arr))> (*)[], ElementType (*)[]>
+            : ptr{arr.data()}, len{N} {}
         template<typename U, usize N>
-        constexpr Slice(const std::array<U, N> &arr) noexcept : ptr{arr.data()}, len{N} {}
+        constexpr Slice(const std::array<U, N> &arr) noexcept
+            requires std::is_convertible_v<std::remove_pointer_t<decltype(std::data(arr))> (*)[], ElementType (*)[]>
+            : ptr{arr.data()}, len{N} {}
+        template<typename U>
+        constexpr Slice(const Slice<U> &other) noexcept
+            requires std::is_convertible_v<U (*)[], ElementType (*)[]>
+            : Slice(other.ptr, other.len) {}
         constexpr Slice(const Slice &) noexcept = default;
-        constexpr Slice(Slice &&) noexcept = default;
 
         constexpr Slice &operator=(const Slice &) noexcept = default;
-        constexpr Slice &operator=(Slice &&) noexcept = default;
 
         constexpr Iterator begin() const noexcept { return ptr; }
         constexpr ConstIterator cbegin() const noexcept { return ptr; }
@@ -3959,7 +3986,9 @@ namespace fstd {
         constexpr bool empty() const noexcept { return len == 0; }
 
         template<typename U>
-        constexpr operator U() const noexcept {
+        constexpr operator U() const noexcept
+            requires std::convertible_to<T *, typename U::CSliceMarker *>
+        {
             return {.ptr = this->ptr, .len = this->len};
         }
     };
@@ -3967,6 +3996,7 @@ namespace fstd {
     struct StrConst : FSTD_StrConst {
         using Type = StrConst;
         using FStd = FSTD_StrConst;
+        using ElementType = const char;
         using ValueType = char;
         using SizeType = usize;
         using DifferenceType = isize;
@@ -3982,24 +4012,31 @@ namespace fstd {
         constexpr StrConst() noexcept = default;
         constexpr StrConst(const char *it) noexcept : StrConst(it, std::char_traits<char>::length(it)) {};
         template<typename It>
-        constexpr StrConst(It first, usize count) noexcept :
-            FSTD_StrConst{.ptr = std::to_address(first), .len = count} {}
+        constexpr StrConst(It first, usize count) noexcept
+            requires std::is_convertible_v<std::remove_reference_t<std::iter_reference_t<It>> (*)[], ElementType (*)[]>
+            : FSTD_StrConst{.ptr = std::to_address(first), .len = count} {}
         template<typename It, typename End>
-        constexpr StrConst(It first, End last) noexcept : StrConst(first, last - first) {}
+        constexpr StrConst(It first, End last) noexcept
+            requires std::is_convertible_v<std::remove_reference_t<std::iter_reference_t<It>> (*)[], ElementType (*)[]>
+            : StrConst(first, last - first) {}
         template<usize N>
         constexpr StrConst(std::type_identity_t<const char> (&arr)[N]) noexcept : StrConst(arr, N) {}
         template<typename T, usize N>
-        constexpr StrConst(std::array<T, N> &arr) noexcept : StrConst(arr.data(), N) {}
+        constexpr StrConst(std::array<T, N> &arr) noexcept
+            requires std::is_convertible_v<std::remove_pointer_t<decltype(std::data(arr))> (*)[], ElementType (*)[]>
+            : StrConst(arr.data(), N) {}
         template<typename T, usize N>
-        constexpr StrConst(const std::array<T, N> &arr) noexcept : StrConst(arr.data(), N) {}
-        constexpr StrConst(const Slice<char> &slice) noexcept : StrConst(slice.data(), slice.size()) {}
-        constexpr StrConst(const Slice<const char> &slice) noexcept : StrConst(slice.data(), slice.size()) {}
+        constexpr StrConst(const std::array<T, N> &arr) noexcept
+            requires std::is_convertible_v<std::remove_pointer_t<decltype(std::data(arr))> (*)[], ElementType (*)[]>
+            : StrConst(arr.data(), N) {}
+        template<typename T>
+        constexpr StrConst(const Slice<T> &slice) noexcept
+            requires std::is_convertible_v<T (*)[], ElementType (*)[]>
+            : StrConst(slice.data(), slice.size()) {}
         constexpr StrConst(const FStd &other) noexcept : FStd(other) {};
         constexpr StrConst(const StrConst &) noexcept = default;
-        constexpr StrConst(StrConst &&) noexcept = default;
 
         constexpr StrConst &operator=(const StrConst &) noexcept = default;
-        constexpr StrConst &operator=(StrConst &&) noexcept = default;
 
         friend constexpr auto operator<=>(StrConst lhs, StrConst rhs) noexcept {
             return std::lexicographical_compare_three_way(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());

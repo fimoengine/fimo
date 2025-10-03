@@ -55,7 +55,7 @@ typedef struct FWRLD__Sys *FWRLD_Sys;
 /// Arguments passed to a system function.
 ///
 /// Should not be copied, as it may be extended in the future.
-typedef struct {
+typedef struct FWRLD_SysArgs {
     /// World owning the system.
     FWRLD_World world;
     /// Scheduler owning the system.
@@ -90,7 +90,7 @@ enum {
     FWRLD__SysDescTag_ = FSTD_I32_MAX,
 };
 
-typedef struct {
+typedef struct FWRLD_SysCondDesc {
     /// List of required resrources with read access.
     FSTD_SliceConst(FWRLD_Res) read;
     /// List of required resrources with write access.
