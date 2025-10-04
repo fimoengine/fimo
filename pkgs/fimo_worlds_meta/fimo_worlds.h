@@ -388,7 +388,7 @@ namespace fworlds {
         /// If no scheduler is provided, the scheduler will be created in
         /// single threaded mode. And all systems will be run in the thread
         /// that starts the schedule operation.
-        FTSK_Executor *FSTD_MAYBE_NULL executor;
+        std::optional<ftasks::Executor> executor;
     };
 
     struct SysDesc;
@@ -423,8 +423,8 @@ namespace fworlds {
         /// Multiple concurrent schedule operations are serialized. The arena must remain valid until `completion` is
         /// signaled. The systems will start running after `start` is signaled. If no executor is associated with the
         /// scheduler, this operation will block the calling thread until all systems are run.
-        auto schedule(fstd::Arena &arena, FTSK_Fence *FSTD_MAYBE_NULL start,
-                      FTSK_Fence *FSTD_MAYBE_NULL completion) const noexcept -> void {
+        auto schedule(fstd::Arena &arena, ftasks::Fence *FSTD_MAYBE_NULL start,
+                      ftasks::Fence *FSTD_MAYBE_NULL completion) const noexcept -> void {
             fwrld_scheduler_schedule(this->handle, &arena, start, completion);
         }
 
@@ -792,7 +792,7 @@ namespace fworlds {
             constexpr System(fstd::StrConst label, const ArgsTuple<typename CallableInfo<F>::Type>::Type &args,
                              F f) noexcept : label(label) {
                 static_assert(std::is_same_v<void, typename CallableInfo<F>::Return> or
-                              std::is_same_v<FTSK_Fence *, typename CallableInfo<F>::Return>);
+                              std::is_same_v<ftasks::Fence *, typename CallableInfo<F>::Return>);
                 this->args = {reinterpret_cast<const Arg *>(&args),
                               fstd::TupleSizeV<std::remove_cvref_t<decltype(args)>>};
                 static_assert(std::is_convertible_v<F, typename CallableInfo<F>::StaticType>);
@@ -819,7 +819,7 @@ namespace fworlds {
             constexpr System(fstd::StrConst label, const ArgsTuple<typename CallableInfo<F>::Type>::Type &args,
                              F &f) noexcept : label(label) {
                 static_assert(std::is_same_v<void, typename CallableInfo<F>::Return> or
-                              std::is_same_v<FTSK_Fence *, typename CallableInfo<F>::Return>);
+                              std::is_same_v<ftasks::Fence *, typename CallableInfo<F>::Return>);
                 this->args = {reinterpret_cast<const Arg *>(&args),
                               fstd::TupleSizeV<std::remove_cvref_t<decltype(args)>>};
                 if constexpr (std::is_convertible_v<F, typename CallableInfo<F>::StaticType>) {
@@ -859,7 +859,7 @@ namespace fworlds {
                              const ArgsTuple<typename CallableInfo<decltype(f)>::Type>::Type &args,
                              fstd::ConstexprValue<f>) noexcept : label(label) {
                 static_assert(std::is_same_v<void, typename CallableInfo<decltype(f)>::Return> or
-                              std::is_same_v<FTSK_Fence *, typename CallableInfo<decltype(f)>::Return>);
+                              std::is_same_v<ftasks::Fence *, typename CallableInfo<decltype(f)>::Return>);
                 this->args = {reinterpret_cast<const Arg *>(&args),
                               fstd::TupleSizeV<std::remove_cvref_t<decltype(args)>>};
                 this->context = nullptr;
@@ -946,11 +946,11 @@ namespace fworlds {
         /// The handle is invalidated after calling this function.
         /// The operation signals the fence on completion.
         /// If no fence is provided, this function blocks until completion.
-        auto deinit(FTSK_Fence *FSTD_MAYBE_NULL fence = nullptr) const noexcept -> void {
+        auto deinit(ftasks::Fence *FSTD_MAYBE_NULL fence = nullptr) const noexcept -> void {
             if (this->handle)
                 fwrld_sys_deinit(this->handle, fence);
             else if (fence)
-                ftsk_fence_signal(fence);
+                fence->signal();
         }
     };
 
@@ -992,7 +992,8 @@ namespace fworlds {
     /// Adds an empty scheduler to the world.
     [[nodiscard]]
     inline auto World::add_scheduler(const SchedulerDesc &desc) const noexcept -> Scheduler {
-        FWRLD_SchedulerDesc d{.label = desc.label, .executor = desc.executor};
+        FWRLD_SchedulerDesc d{.label = desc.label,
+                              .executor = desc.executor.transform([](auto x) { return x.handle; }).value_or(nullptr)};
         return Scheduler{fwrld_world_add_scheduler(this->handle, &d)};
     }
 

@@ -4087,7 +4087,6 @@ namespace fstd {
 
 #pragma pack(push, 1)
         template<auto Member, typename Parent, usize Offset>
-            requires std::is_standard_layout_v<Parent>
         union OffsetOfUnion;
         template<typename T, typename Base, T Base::*Member, typename Parent, usize Offset>
         union OffsetOfUnion<Member, Parent, Offset> {

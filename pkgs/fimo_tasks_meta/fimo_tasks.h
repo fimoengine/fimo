@@ -155,14 +155,14 @@ typedef struct {
     /// The maximum number of spawned tasks is determined as `worker_count * max_load_factor`.
     /// A value of `0` indicates to use the default load factor.
     FSTD_USize max_load_factor;
-    /// Minimum size of the per-task arena.
-    ///
-    /// A value of `0` indicates to use the default arena size.
-    FSTD_USize arena_size;
     /// Minimum stack size in bytes.
     ///
     /// A value of `0` indicates to use the default stack size.
     FSTD_USize stack_size;
+    /// Minimum size of the per-task arena.
+    ///
+    /// A value of `0` indicates to use the default arena size.
+    FSTD_USize arena_size;
     /// Number of cached stacks per worker.
     ///
     /// The cache is shared among all workers.
@@ -763,7 +763,754 @@ namespace ftasks {
                 FutexRequeue,
         };
     } // namespace sym
+
+    /// Identifier of a task.
+    struct TaskId {
+        enum class Value : FTSK_TaskId {};
+
+        Value value;
+
+        std::optional<TaskId> current() noexcept {
+            FTSK_TaskId id;
+            if (!sym::TaskId.get()(&id))
+                return std::nullopt;
+            return TaskId{static_cast<Value>(id)};
+        }
+    };
+
+    /// A unit of work.
+    struct Worker {
+        enum class Value : FTSK_Worker {};
+
+        Value value;
+
+        std::optional<Worker> current() noexcept {
+            FTSK_Worker id;
+            if (!sym::WorkerId.get()(&id))
+                return std::nullopt;
+            return Worker{static_cast<Value>(id)};
+        }
+    };
+
+    struct Task : FTSK_Task {
+        constexpr Task() noexcept = default;
+        constexpr Task(void (*run)(FTSK_Task *, fstd::usize)) noexcept : Task({}, 1, run) {}
+        constexpr Task(fstd::StrConst label, void (*run)(FTSK_Task *, fstd::usize)) noexcept : Task(label, 1, run) {}
+        constexpr Task(fstd::usize batch_len, void (*run)(FTSK_Task *, fstd::usize)) noexcept :
+            Task({}, batch_len, run) {}
+        constexpr Task(fstd::StrConst label, fstd::usize batch_len, void (*run)(FTSK_Task *, fstd::usize)) noexcept :
+            FTSK_Task{.label = label, .batch_len = batch_len, .run = run} {}
+        constexpr explicit Task(const FTSK_Task &other) noexcept : FTSK_Task(other) {}
+        constexpr Task(const Task &other) noexcept = default;
+        constexpr Task(Task &&other) noexcept = default;
+        constexpr Task &operator=(const Task &other) noexcept = default;
+        constexpr Task &operator=(Task &&other) noexcept = default;
+    };
+
+    /// Yields the current task or thread back to the scheduler.
+    inline static void yield() noexcept { return sym::Yield.get()(); }
+
+    /// Aborts the current task.
+    inline static void abort() noexcept { return sym::Abort.get()(); }
+
+    /// Reports whether a cancellation of the current task has been requested.
+    inline static bool cancelRequested() noexcept { return sym::CancelRequested.get()(); }
+
+    /// Puts the current task or thread to sleep for the specified amount of time.
+    inline static void sleep(fstd::Duration duration) noexcept { return sym::Sleep.get()(duration); }
+
+    /// Fetches the arena of the current task.
+    inline static std::optional<std::reference_wrapper<fstd::Arena>> taskArena() noexcept {
+        fstd::Arena *arena = static_cast<fstd::Arena *>(sym::TaskArena.get()());
+        if (!arena)
+            return std::nullopt;
+        return {*arena};
+    }
+
+    /// A key for a task-specific-storage.
+    template<typename T>
+    struct TssKey {
+        constexpr TssKey() noexcept = default;
+        constexpr TssKey(const TssKey &other) noexcept = delete;
+        constexpr TssKey(TssKey &&other) noexcept = delete;
+        constexpr TssKey &operator=(const TssKey &other) noexcept = delete;
+        constexpr TssKey &operator=(TssKey &&other) noexcept = delete;
+
+        /// Returns the value associated to the key for the current task.
+        ///
+        /// May only be called by a task.
+        T *get() const noexcept {
+            return static_cast<T *>(sym::TaskLocalGet.get()(reinterpret_cast<FTSK_TssKey *>(this)));
+        }
+
+        /// Associates a value with the key for the current task.
+        ///
+        /// The current value associated with the key is replaced with the new value without
+        /// invoking any destructor function. The destructor function is set to `dtor`, and will
+        /// be invoked upon task exit. May only be called by a task.
+        void set(T *value, void (*dtor)(T *)) const noexcept {
+            return sym::TaskLocalSet.get()(reinterpret_cast<FTSK_TssKey *>(this), value, dtor);
+        }
+
+        /// Clears the value of the current task associated with the key.
+        ///
+        /// This operation invokes the associated destructor function and sets the value to `null`.
+        /// May only be called by a task.
+        void clear() const noexcept { return sym::TaskLocalClear.get()(reinterpret_cast<FTSK_TssKey *>(this)); }
+    };
+
+    /// A list of commands to process by an executor.
+    struct CmdBuf : FTSK_CmdBuf {
+        /// An entry of a command buffer.
+        struct Cmd : FTSK_CmdBufCmd {
+            /// NOLINTNEXTLINE(performance-enum-size)
+            enum class Tag : FTSK_CmdBufCmdTag {
+                Noop = FTSK_CmdBufCmdTag_Noop,
+                SelectWorker = FTSK_CmdBufCmdTag_SelectWorker,
+                SelectAnyWorker = FTSK_CmdBufCmdTag_SelectAnyWorker,
+                EnqueueTask = FTSK_CmdBufCmdTag_EnqueueTask,
+                WaitOnBarrier = FTSK_CmdBufCmdTag_WaitOnBarrier,
+                WaitOnCmdIndirect = FTSK_CmdBufCmdTag_WaitOnCmdIndirect,
+            };
+
+            struct NoopT {};
+            constexpr static NoopT Noop{};
+
+            struct SelectAnyWorkerT {};
+            constexpr static SelectAnyWorkerT SelectAnyWorker{};
+
+            struct WaitOnBarrierT {};
+            constexpr static WaitOnBarrierT WaitOnBarrier{};
+
+            struct WaitOnCmdIndirect {
+                fstd::usize offset;
+            };
+
+            constexpr Cmd() noexcept = default;
+            constexpr Cmd(NoopT) noexcept : Cmd() {}
+            constexpr Cmd(Worker worker) noexcept :
+                FTSK_CmdBufCmd{.tag = static_cast<FTSK_CmdBufCmdTag>(Tag::SelectWorker),
+                               .select_worker = static_cast<FTSK_Worker>(worker.value)} {}
+            constexpr Cmd(SelectAnyWorkerT) noexcept :
+                FTSK_CmdBufCmd{.tag = static_cast<FTSK_CmdBufCmdTag>(Tag::SelectAnyWorker), .select_any_worker = 0} {}
+            constexpr Cmd(Task &task) noexcept :
+                FTSK_CmdBufCmd{.tag = static_cast<FTSK_CmdBufCmdTag>(Tag::EnqueueTask), .enqueue_task = &task} {}
+            constexpr Cmd(WaitOnBarrierT) noexcept :
+                FTSK_CmdBufCmd{.tag = static_cast<FTSK_CmdBufCmdTag>(Tag::WaitOnBarrier), .wait_on_barrier = 0} {}
+            constexpr Cmd(WaitOnCmdIndirect cmd) noexcept :
+                FTSK_CmdBufCmd{.tag = static_cast<FTSK_CmdBufCmdTag>(Tag::WaitOnCmdIndirect),
+                               .wait_on_cmd_indirect = cmd.offset} {}
+            constexpr explicit Cmd(const FTSK_CmdBufCmd &other) noexcept : FTSK_CmdBufCmd(other) {}
+            constexpr Cmd(const Cmd &other) noexcept = default;
+            constexpr Cmd(Cmd &&other) noexcept = default;
+            constexpr Cmd &operator=(const Cmd &other) noexcept = default;
+            constexpr Cmd &operator=(Cmd &&other) noexcept = default;
+        };
+
+        constexpr CmdBuf() noexcept = default;
+        constexpr CmdBuf(fstd::Slice<Cmd> cmds) noexcept : CmdBuf({}, cmds, nullptr) {};
+        constexpr CmdBuf(fstd::StrConst label, fstd::Slice<Cmd> cmds) noexcept : CmdBuf(label, cmds, nullptr) {};
+        constexpr CmdBuf(fstd::Slice<Cmd> cmds, void (*dtor)(FTSK_CmdBuf *)) noexcept : CmdBuf({}, cmds, dtor) {};
+        constexpr CmdBuf(fstd::StrConst label, fstd::Slice<Cmd> cmds, void (*dtor)(FTSK_CmdBuf *)) noexcept :
+            FTSK_CmdBuf{.label = label, .cmds = cmds, .deinit = dtor} {};
+        constexpr explicit CmdBuf(const FTSK_CmdBuf &other) noexcept : FTSK_CmdBuf(other) {}
+        constexpr CmdBuf(const CmdBuf &other) noexcept = default;
+        constexpr CmdBuf(CmdBuf &&other) noexcept = default;
+        constexpr CmdBuf &operator=(const CmdBuf &other) noexcept = default;
+        constexpr CmdBuf &operator=(CmdBuf &&other) noexcept = default;
+    };
+
+    /// A handle to an enqueued command buffer.
+    struct CmdBufHandle {
+        FTSK_CmdBufHandle *handle;
+
+        constexpr CmdBufHandle() noexcept = default;
+        constexpr explicit CmdBufHandle(FTSK_CmdBufHandle *other) noexcept : handle(other) {}
+        constexpr CmdBufHandle(const CmdBufHandle &other) noexcept = default;
+        constexpr CmdBufHandle(CmdBufHandle &&other) noexcept = default;
+        constexpr CmdBufHandle &operator=(const CmdBufHandle &other) noexcept = default;
+        constexpr CmdBufHandle &operator=(CmdBufHandle &&other) noexcept = default;
+
+        // NOLINTNEXTLINE(performance-enum-size)
+        enum class CompletionStatus : FTSK_CmdBufHandleCompletionStatus {
+            Completed = FTSK_CmdBufHandleCompletionStatus_Completed,
+            Cancelled = FTSK_CmdBufHandleCompletionStatus_Cancelled,
+        };
+
+        /// Waits for the command buffer to complete.
+        ///
+        /// Once called, the handle is consumed.
+        CompletionStatus join() const noexcept { return static_cast<CompletionStatus>(sym::CmdBufJoin.get()(handle)); }
+
+        /// Release the obligation of the caller to call join and
+        /// have the handle be cleaned up on completion.
+        ///
+        /// Once called, the handle is consumed.
+        void detach() const noexcept { return sym::CmdBufDetach.get()(handle); }
+
+        /// Like `join`, but flags the handle as cancelled.
+        void cancel() const noexcept { return sym::CmdBufCancel.get()(handle); }
+
+        /// Like `detach`, but flags the handle as cancelled.
+        void cancelDetach() const noexcept { return sym::CmdBufCancelDetach.get()(handle); }
+    };
+
+    /// A handle to an executor.
+    struct Executor {
+        FTSK_Executor *handle;
+
+        constexpr Executor() noexcept = default;
+        constexpr explicit Executor(FTSK_Executor *other) noexcept : handle(other) {}
+        constexpr Executor(const Executor &other) noexcept = default;
+        constexpr Executor(Executor &&other) noexcept = default;
+        constexpr Executor &operator=(const Executor &other) noexcept = default;
+        constexpr Executor &operator=(Executor &&other) noexcept = default;
+
+        struct Cfg {
+            /// Optional label of the executor.
+            fstd::StrConst label;
+            /// Maximum number of enqueued cmd buffers.
+            ///
+            /// A value of `0` indicates to use the default capacity.
+            fstd::usize cmd_buf_capacity;
+            /// Number of worker threads owned by the executor.
+            ///
+            /// A value of `0` indicates to use the default number of workers.
+            fstd::usize worker_count;
+            /// Controls the maximum number of spawned tasks.
+            ///
+            /// The maximum number of spawned tasks is determined as `worker_count * max_load_factor`.
+            /// A value of `0` indicates to use the default load factor.
+            fstd::usize max_load_factor;
+            /// Minimum stack size in bytes.
+            ///
+            /// A value of `0` indicates to use the default stack size.
+            fstd::usize stack_size;
+            /// Minimum size of the per-task arena.
+            ///
+            /// A value of `0` indicates to use the default arena size.
+            fstd::usize arena_size;
+            /// Number of cached stacks per worker.
+            ///
+            /// The cache is shared among all workers.
+            /// A value of `0` indicates to use the default cache length.
+            fstd::usize worker_stack_cache_len;
+            /// Indicates whether to disable the stack cache.
+            bool disable_stack_cache;
+        };
+
+        /// Returns the global executor.
+        static Executor global() noexcept { return Executor{const_cast<FTSK_Executor *>(&sym::ExecutorGlobal.get())}; }
+
+        /// Creates a new executor with the provided configuration.
+        static std::expected<Executor, fstd::Status> init(const Cfg &cfg) noexcept {
+            FTSK_ExecutorCfg ccfg = {
+                    .label = cfg.label,
+                    .cmd_buf_capacity = cfg.cmd_buf_capacity,
+                    .worker_count = cfg.worker_count,
+                    .max_load_factor = cfg.max_load_factor,
+                    .stack_size = cfg.stack_size,
+                    .arena_size = cfg.arena_size,
+                    .worker_stack_cache_len = cfg.worker_stack_cache_len,
+                    .disable_stack_cache = cfg.disable_stack_cache,
+            };
+            Executor exe{};
+            fstd::Status status = static_cast<fstd::Status>(sym::ExecutorInit.get()(&exe.handle, &ccfg));
+            if (status != fstd::Status::Ok)
+                return std::unexpected(status);
+            return exe;
+        }
+
+        /// Returns the executor for the current context.
+        ///
+        /// Is only valid for the duration of the current context (i.e. Task).
+        static std::optional<Executor> current() noexcept {
+            Executor exe{sym::ExecutorCurrent.get()()};
+            if (!exe.handle)
+                return std::nullopt;
+            return exe;
+        }
+
+        /// Waits until all remaining commands have been executed and consumes the handle.
+        ///
+        /// New commands can be enqueued to the executor while the call is in process.
+        void join() const noexcept { return sym::ExecutorJoin.get()(handle); }
+
+        /// Reports whether the owner of the executor has requested that the executor be joined.
+        bool joinRequested() const noexcept { return sym::ExecutorJoinRequested.get()(handle); }
+
+        /// Enqueues the commands to the executor.
+        ///
+        /// The caller will block until the handle could be enqueued.
+        /// The buffer must outlive the returned handle.
+        CmdBufHandle enqueue(CmdBuf &cmd_buf) const noexcept {
+            return CmdBufHandle{sym::ExecutorEnqueue.get()(handle, &cmd_buf)};
+        }
+
+        /// Enqueues the commands to the executor.
+        ///
+        /// The caller will block until the handle could be enqueued.
+        /// The buffer must outlive the returned handle.
+        void enqueueDetached(CmdBuf &cmd_buf) const noexcept {
+            return sym::ExecutorEnqueueDetached.get()(handle, &cmd_buf);
+        }
+
+        /// Invokes the callable on each element of the slice.
+        ///
+        /// The slice is split up in chunks of `batch_size` length, which are possibly
+        /// processed in parallel. The `threshold` specifies the minimum number of elements
+        /// required to switch over to parallel processing. It is recommended that the
+        /// `threshold` be set to a multiple of the `batch_size`.
+        template<typename T, fstd::InvocableWithReturn<void, T &> Callable>
+        void forEach(fstd::Slice<T> elements, fstd::usize batch_size, fstd::usize threshold,
+                     Callable &&f) const noexcept {
+            if (elements.size() < threshold) {
+                for (auto &element: elements) {
+                    std::invoke(f, element);
+                }
+                return;
+            }
+
+            fstd_dbg_assert(batch_size != 0);
+            struct Context {
+                fstd::usize batch_size;
+                fstd::Slice<T> elements;
+                Callable f;
+                Task task;
+
+                static void run(FTSK_Task *task, fstd::usize index) noexcept {
+                    Context &ctx = *fstd::parentOf(static_cast<Task *>(task), fstd::ConstexprValue<&Context::task>{});
+                    fstd::usize start_idx = index * ctx.batch_size;
+                    fstd::usize end_idx = start_idx + ctx.batch_size;
+                    for (fstd::usize i = start_idx; i < end_idx; i++) {
+                        std::invoke(ctx.f, ctx.elements[i]);
+                    }
+                }
+            };
+            fstd::usize num_batches = 1 + ((elements.size() - 1) / batch_size);
+            Context ctx = {
+                    .batch_size = batch_size,
+                    .elements = elements,
+                    .f = std::forward<Callable>(f),
+                    .task =
+                            {
+                                    num_batches,
+                                    Context::run,
+                            },
+            };
+
+            std::array<CmdBuf::Cmd, 1> cmd = {{ctx.task}};
+            CmdBuf cmd_buf = {cmd};
+            enqueue(cmd_buf).join();
+        }
+
+        /// Invokes the callable on each element of the slice.
+        ///
+        /// The slice is split up in chunks of `batch_size` length, which are possibly
+        /// processed in parallel.
+        template<typename T, fstd::InvocableWithReturn<void, T &> Callable>
+        void forEach(fstd::Slice<T> elements, fstd::usize batch_size, Callable &&f) const noexcept {
+            return forEach(elements, batch_size, batch_size, std::forward<Callable>(f));
+        }
+    };
+
+    namespace futex {
+        // NOLINTNEXTLINE(performance-enum-size)
+        enum class Status : FTSK_FutexStatus {
+            Ok = FTSK_FutexStatus_Ok,
+            Invalid = FTSK_FutexStatus_Invalid,
+            Timeout = FTSK_FutexStatus_Timeout,
+            KeyError = FTSK_FutexStatus_KeyError,
+        };
+
+        using KeyExpect = FTSK_FutexKeyExpect;
+        using Filter = FTSK_FutexFilter;
+        constexpr static Filter All = FTSK_FUTEX_FILTER_ALL;
+
+        using RequeueResult = FTSK_FutexRequeueResult;
+
+        static_assert(std::atomic<fstd::u8>::is_always_lock_free);
+        static_assert(std::atomic<fstd::u16>::is_always_lock_free);
+        static_assert(std::atomic<fstd::u32>::is_always_lock_free);
+        static_assert(std::atomic<fstd::u64>::is_always_lock_free);
+        static_assert(std::atomic<fstd::i8>::is_always_lock_free);
+        static_assert(std::atomic<fstd::i16>::is_always_lock_free);
+        static_assert(std::atomic<fstd::i32>::is_always_lock_free);
+        static_assert(std::atomic<fstd::i64>::is_always_lock_free);
+
+        template<typename T, typename U>
+        concept Awaitable = (sizeof(T) <= sizeof(fstd::u64)) and std::integral<U> and
+                            (std::same_as<T, U> or std::same_as<T, std::atomic<U>>);
+
+        /// Puts the caller to sleep if the value pointed to by `key` equals `expect`.
+        ///
+        /// If the value does not match, the function returns imediately with `Status::Invalid`. The
+        /// `key_size` parameter specifies the size of the value in bytes and must be either of `1`, `2`,
+        /// `4` or `8`, in which case `key` is treated as pointer to `u8`, `u16`, `u32`, or
+        /// `u64` respectively, and `expect` is truncated. The `token` is a user definable integer to store
+        /// additional metadata about the waiter, which can be utilized to controll some wake operations.
+        static inline Status wait(const void *key, fstd::usize key_size, fstd::u64 expect, fstd::usize token,
+                                  const fstd::Instant &timeout) noexcept {
+            return static_cast<Status>(sym::FutexWait.get()(key, key_size, expect, token, &timeout));
+        }
+
+        /// Puts the caller to sleep if the value pointed to by `key` equals `expect`.
+        ///
+        /// If the value does not match, the function returns imediately with `Status::Invalid`. The
+        /// `key_size` parameter specifies the size of the value in bytes and must be either of `1`, `2`,
+        /// `4` or `8`, in which case `key` is treated as pointer to `u8`, `u16`, `u32`, or
+        /// `u64` respectively, and `expect` is truncated.
+        static inline Status wait(const void *key, fstd::usize key_size, fstd::u64 expect,
+                                  const fstd::Instant &timeout) noexcept {
+            return wait(key, key_size, expect, 0, timeout);
+        }
+
+        template<std::integral T, Awaitable<T> A>
+        static inline Status wait(const A &value, T expect, fstd::usize token, const fstd::Instant &timeout) noexcept {
+            return wait(&value, sizeof(T), std::bit_cast<std::make_unsigned_t<T>>(expect), token, timeout);
+        }
+
+        template<std::integral T, Awaitable<T> A>
+        static inline Status wait(const A &value, T expect, const fstd::Instant &timeout) noexcept {
+            return wait(&value, sizeof(T), std::bit_cast<std::make_unsigned_t<T>>(expect), timeout);
+        }
+
+        /// Puts the caller to sleep if the value pointed to by `key` equals `expect`.
+        ///
+        /// If the value does not match, the function returns imediately with `Status::Invalid`. The
+        /// `key_size` parameter specifies the size of the value in bytes and must be either of `1`, `2`,
+        /// `4` or `8`, in which case `key` is treated as pointer to `u8`, `u16`, `u32`, or
+        /// `u64` respectively, and `expect` is truncated. The `token` is a user definable integer to store
+        /// additional metadata about the waiter, which can be utilized to controll some wake operations.
+        static inline Status wait(const void *key, fstd::usize key_size, fstd::u64 expect, fstd::usize token) noexcept {
+            return static_cast<Status>(sym::FutexWait.get()(key, key_size, expect, token, nullptr));
+        }
+
+        /// Puts the caller to sleep if the value pointed to by `key` equals `expect`.
+        ///
+        /// If the value does not match, the function returns imediately with `Status::Invalid`. The
+        /// `key_size` parameter specifies the size of the value in bytes and must be either of `1`, `2`,
+        /// `4` or `8`, in which case `key` is treated as pointer to `u8`, `u16`, `u32`, or
+        /// `u64` respectively, and `expect` is truncated.
+        static inline Status wait(const void *key, fstd::usize key_size, fstd::u64 expect) noexcept {
+            return wait(key, key_size, expect, 0);
+        }
+
+        template<std::integral T, Awaitable<T> A>
+        static inline Status wait(const A &value, T expect, fstd::usize token) noexcept {
+            return wait(&value, sizeof(T), std::bit_cast<std::make_unsigned_t<T>>(expect), token);
+        }
+
+        template<std::integral T, Awaitable<T> A>
+        static inline Status wait(const A &value, T expect) noexcept {
+            return wait(&value, sizeof(T), std::bit_cast<std::make_unsigned_t<T>>(expect));
+        }
+
+        /// Puts the caller to sleep if all keys match their expected values.
+        ///
+        /// Is a generalization of `wait` for multiple keys. At least `1` key must, and at most
+        /// `max_waitv_key_count` may be passed to this function. Otherwise it returns `Status::KeyError`.
+        static inline std::expected<fstd::usize, Status> waitv(fstd::Slice<const KeyExpect> keys,
+                                                               const fstd::Instant &timeout) noexcept {
+            fstd::usize wake_idx;
+            Status status = static_cast<Status>(sym::FutexWaitv.get()(keys, &timeout, &wake_idx));
+            if (status != Status::Ok)
+                return std::unexpected(status);
+            return wake_idx;
+        }
+
+        /// Puts the caller to sleep if all keys match their expected values.
+        ///
+        /// Is a generalization of `wait` for multiple keys. At least `1` key must, and at most
+        /// `max_waitv_key_count` may be passed to this function. Otherwise it returns `Status::KeyError`.
+        static inline std::expected<fstd::usize, Status> waitv(fstd::Slice<const KeyExpect> keys) noexcept {
+            fstd::usize wake_idx;
+            Status status = static_cast<Status>(sym::FutexWaitv.get()(keys, nullptr, &wake_idx));
+            if (status != Status::Ok)
+                return std::unexpected(status);
+            return wake_idx;
+        }
+
+        /// Wakes at most `max_waiters` waiting on `key`.
+        ///
+        /// Uses the token provided by the waiter and the `filter` to determine whether to ignore it from
+        /// being woken up. Returns the number of woken waiters.
+        static inline fstd::usize wake(const void *key, fstd::usize max_waiters, Filter filter) noexcept {
+            return sym::FutexWake.get()(key, max_waiters, filter);
+        }
+
+        /// Wakes at most `max_waiters` waiting on `key`.
+        ///
+        /// Returns the number of woken waiters.
+        static inline fstd::usize wake(const void *key, fstd::usize max_waiters) noexcept {
+            return wake(key, max_waiters, All);
+        }
+
+        /// Wakes all waiters waiting on `key`.
+        ///
+        /// Uses the token provided by the waiter and the `filter` to determine whether to ignore it from
+        /// being woken up. Returns the number of woken waiters.
+        static inline fstd::usize wake(const void *key, Filter filter) noexcept {
+            return wake(key, std::numeric_limits<fstd::usize>::max(), filter);
+        }
+
+        /// Wakes all waiters waiting on `key`.
+        ///
+        /// Returns the number of woken waiters.
+        static inline fstd::usize wake(const void *key) noexcept {
+            return wake(key, std::numeric_limits<fstd::usize>::max());
+        }
+
+        /// Requeues waiters from `key_from` to `key_to`.
+        ///
+        /// Checks if the value behind `key_from` equals `expect`, in which case up to a maximum of
+        /// `max_wakes` waiters are woken up from `key_from` and a maximum of `max_requeues` waiters
+        /// are requeued from the `key_from` queue to the `key_to` queue. If the value does not match
+        /// the function returns `Status::Invalid`. Uses the token provided by the waiter and the `filter`
+        /// to determine whether to ignore it from being woken up.
+        static inline std::expected<RequeueResult, Status> requeue(const void *key_from, const void *key_to,
+                                                                   fstd::usize key_size, fstd::u64 expect,
+                                                                   fstd::usize max_wakes, fstd::usize max_requeues,
+                                                                   Filter filter) noexcept {
+            RequeueResult result;
+            Status status = static_cast<Status>(sym::FutexRequeue.get()(key_from, key_to, key_size, expect, max_wakes,
+                                                                        max_requeues, filter, &result));
+            if (status != Status::Ok)
+                return std::unexpected(status);
+            return result;
+        }
+
+        /// Requeues waiters from `key_from` to `key_to`.
+        ///
+        /// Checks if the value behind `key_from` equals `expect`, in which case up to a maximum of
+        /// `max_wakes` waiters are woken up from `key_from` and a maximum of `max_requeues` waiters
+        /// are requeued from the `key_from` queue to the `key_to` queue. If the value does not match
+        /// the function returns `Status::Invalid`.
+        static inline std::expected<RequeueResult, Status> requeue(const void *key_from, const void *key_to,
+                                                                   fstd::usize key_size, fstd::u64 expect,
+                                                                   fstd::usize max_wakes,
+                                                                   fstd::usize max_requeues) noexcept {
+            return requeue(key_from, key_to, key_size, expect, max_wakes, max_requeues, All);
+        }
+
+        template<std::integral T, Awaitable<T> A>
+        static inline std::expected<RequeueResult, Status> requeue(const A &from, const A &to, T expect,
+                                                                   fstd::usize max_wakes, fstd::usize max_requeues,
+                                                                   Filter filter) noexcept {
+            return requeue(&from, &to, std::bit_cast<std::make_unsigned_t<T>>(expect), max_wakes, max_requeues, filter);
+        }
+
+        template<std::integral T, Awaitable<T> A>
+        static inline std::expected<RequeueResult, Status>
+        requeue(const A &from, const A &to, T expect, fstd::usize max_wakes, fstd::usize max_requeues) noexcept {
+            return requeue<T, A>(&from, &to, expect, max_wakes, max_requeues, All);
+        }
+    } // namespace futex
+
+    /// Mutex is a synchronization primitive which enforces atomic access to a
+    /// shared region of code known as the "critical section".
+    ///
+    /// It does this by blocking ensuring only one task is in the critical
+    /// section at any given point in time by blocking the others.
+    struct Mutex : FTSK_Mutex {
+        constexpr Mutex() noexcept = default;
+        constexpr Mutex(const FTSK_Mutex &other) noexcept :
+            FTSK_Mutex{.state = other.state.load(std::memory_order_relaxed)} {}
+        constexpr Mutex(const Mutex &other) noexcept : Mutex(static_cast<const FTSK_Mutex &>(other)) {}
+        constexpr Mutex(Mutex &&other) noexcept : Mutex(static_cast<const FTSK_Mutex &>(other)) {}
+        constexpr Mutex &operator=(const Mutex &other) noexcept {
+            if (this != &other) {
+                this->state = other.state.load(std::memory_order_relaxed);
+            }
+            return *this;
+        }
+        constexpr Mutex &operator=(Mutex &&other) noexcept {
+            if (this != &other) {
+                this->state = other.state.load(std::memory_order_relaxed);
+            }
+            return *this;
+        }
+
+        /// Tries to acquire the mutex without blocking the caller's task.
+        ///
+        /// Returns `false` if the calling task would have to block to acquire it.
+        /// Otherwise, returns `true` and the caller should `unlock()` the Mutex to release it.
+        bool tryLock() noexcept { return ftsk_mutex_try_lock(this); }
+
+        /// Acquires the mutex, blocking the caller's task until it can.
+        ///
+        /// Once acquired, call `unlock()` on the Mutex to release it.
+        void lock() noexcept { return ftsk_mutex_lock(this); }
+
+        /// Tries to acquire the mutex, blocking the caller's task until it can or the timeout is reached.
+        ///
+        /// Returns `true` if the lock could be acquired.
+        /// Once acquired, call `unlock()` on the Mutex to release it.
+        bool tryLockFor(const fstd::Duration &timeout) noexcept { return ftsk_mutex_timed_lock(this, timeout); }
+
+        /// Releases the mutex which was previously acquired.
+        void unlock() noexcept { return ftsk_mutex_unlock(this); }
+    };
+
+    /// Condition variables are used with a Mutex to efficiently wait for an arbitrary condition to occur.
+    /// It does this by atomically unlocking the mutex, blocking the thread until notified, and finally re-locking the
+    /// mutex.
+    struct Condition : FTSK_Condition {
+        constexpr Condition() noexcept = default;
+        constexpr Condition(const FTSK_Condition &other) noexcept :
+            FTSK_Condition{.futex = other.futex.load(std::memory_order_relaxed)} {}
+        constexpr Condition(const Condition &other) noexcept : Condition(static_cast<const FTSK_Condition &>(other)) {}
+        constexpr Condition(Condition &&other) noexcept : Condition(static_cast<const FTSK_Condition &>(other)) {}
+        constexpr Condition &operator=(const Condition &other) noexcept {
+            if (this != &other) {
+                this->futex = other.futex.load(std::memory_order_relaxed);
+            }
+            return *this;
+        }
+        constexpr Condition &operator=(Condition &&other) noexcept {
+            if (this != &other) {
+                this->futex = other.futex.load(std::memory_order_relaxed);
+            }
+            return *this;
+        }
+
+        /// Atomically releases the Mutex, blocks the caller task, then re-acquires the Mutex on return.
+        /// "Atomically" here refers to accesses done on the Condition after acquiring the Mutex.
+        ///
+        /// The Mutex must be locked by the caller's task when this function is called.
+        /// A Mutex can have multiple Conditions waiting with it concurrently, but not the opposite.
+        /// It is undefined behavior for multiple tasks to wait with different mutexes using the same Condition
+        /// concurrently. Once tasks have finished waiting with one Mutex, the Condition can be used to wait with
+        /// another Mutex.
+        ///
+        /// A blocking call to wait() is unblocked from one of the following conditions:
+        /// - a spurious ("at random") wake up occurs
+        /// - a future call to `signal()` or `broadcast()` which has acquired the Mutex and is sequenced after this
+        /// `wait()`.
+        ///
+        /// Given wait() can be interrupted spuriously, the blocking condition should be checked continuously
+        /// irrespective of any notifications from `signal()` or `broadcast()`.
+        void wait(Mutex &mutex) noexcept { return ftsk_condition_wait(this, &mutex); }
+
+        /// Atomically releases the Mutex, blocks the caller task, then re-acquires the Mutex on return.
+        /// "Atomically" here refers to accesses done on the Condition after acquiring the Mutex.
+        ///
+        /// The Mutex must be locked by the caller's task when this function is called.
+        /// A Mutex can have multiple Conditions waiting with it concurrently, but not the opposite.
+        /// It is undefined behavior for multiple tasks to wait with different mutexes using the same Condition
+        /// concurrently. Once tasks have finished waiting with one Mutex, the Condition can be used to wait with
+        /// another Mutex.
+        ///
+        /// A blocking call to `waitFor()` is unblocked from one of the following conditions:
+        /// - a spurious ("at random") wake occurs
+        /// - the caller was blocked for around `timeout`, in which `error.Timeout` is returned.
+        /// - a future call to `signal()` or `broadcast()` which has acquired the Mutex and is sequenced after this
+        /// `waitFor()`.
+        ///
+        /// Given `waitFor()` can be interrupted spuriously, the blocking condition should be checked continuously
+        /// irrespective of any notifications from `signal()` or `broadcast()`.
+        ///
+        /// Returns `true` if the caller was woken up before the timeout elapsed.
+        bool waitFor(Mutex &mutex, const fstd::Duration &timeout) noexcept {
+            return ftsk_condition_timed_wait(this, &mutex, timeout);
+        }
+
+        /// Unblocks at least one task blocked in a call to `wait()` or `waitFor()` with a given Mutex.
+        /// The blocked task must be sequenced before this call with respect to acquiring the same Mutex in order to be
+        /// observable for unblocking. `signal()` can be called with or without the relevant Mutex being acquired and
+        /// have no "effect" if there's no observable blocked threads.
+        void signal() noexcept { return ftsk_condition_signal(this); }
+
+        /// Unblocks all tasks currently blocked in a call to `wait()` or `waitFor()` with a given Mutex.
+        /// The blocked tasks must be sequenced before this call with respect to acquiring the same Mutex in order to be
+        /// observable for unblocking. `broadcast()` can be called with or without the relevant Mutex being acquired and
+        /// have no "effect" if there's no observable blocked threads.
+        void broadcast() noexcept { return ftsk_condition_broadcast(this); }
+    };
+
+    /// A thread-safe boolean that can be set and awaited,
+    /// typically to mark/await the completion of some operation.
+    struct Fence : FTSK_Fence {
+        constexpr Fence() noexcept = default;
+        constexpr Fence(const FTSK_Fence &other) noexcept :
+            FTSK_Fence{.state = other.state.load(std::memory_order_relaxed)} {}
+        constexpr Fence(const Fence &other) noexcept : Fence(static_cast<const FTSK_Fence &>(other)) {}
+        constexpr Fence(Fence &&other) noexcept : Fence(static_cast<const FTSK_Fence &>(other)) {}
+        constexpr Fence &operator=(const Fence &other) noexcept {
+            if (this != &other) {
+                this->state = other.state.load(std::memory_order_relaxed);
+            }
+            return *this;
+        }
+        constexpr Fence &operator=(Fence &&other) noexcept {
+            if (this != &other) {
+                this->state = other.state.load(std::memory_order_relaxed);
+            }
+            return *this;
+        }
+
+        /// Checks if the fence is already signaled.
+        bool isSignaled() noexcept { return ftsk_fence_is_signaled(this); }
+
+        /// Blocks the caller until the fence is signaled.
+        void wait() noexcept { return ftsk_fence_wait(this); }
+
+        /// Blocks the caller until the fence is signaled, or the timeout expires.
+        bool waitFor(const fstd::Duration &timeout) noexcept { return ftsk_fence_timed_wait(this, timeout); }
+
+        /// Wakes all waiters of the fence.
+        void signal() noexcept { return ftsk_fence_signal(this); }
+
+        /// Resets the state of the fence to be unsignaled.
+        ///
+        /// May not be called while threads are waiting on the fence.
+        void reset() noexcept { return ftsk_fence_reset(this); }
+    };
+
+    /// A monotonically increasing counter that can be awaited and signaled.
+    struct TimelineSemaphore : FTSK_TimelineSemaphore {
+        constexpr TimelineSemaphore() noexcept = default;
+        constexpr TimelineSemaphore(fstd::u64 counter) noexcept : FTSK_TimelineSemaphore{.state = counter} {};
+        constexpr TimelineSemaphore(const FTSK_TimelineSemaphore &other) noexcept :
+            FTSK_TimelineSemaphore{.state = other.state.load(std::memory_order_relaxed)} {}
+        constexpr TimelineSemaphore(const TimelineSemaphore &other) noexcept :
+            TimelineSemaphore(static_cast<const FTSK_TimelineSemaphore &>(other)) {}
+        constexpr TimelineSemaphore(TimelineSemaphore &&other) noexcept :
+            TimelineSemaphore(static_cast<const FTSK_TimelineSemaphore &>(other)) {}
+        constexpr TimelineSemaphore &operator=(const TimelineSemaphore &other) noexcept {
+            if (this != &other) {
+                this->state = other.state.load(std::memory_order_relaxed);
+            }
+            return *this;
+        }
+        constexpr TimelineSemaphore &operator=(TimelineSemaphore &&other) noexcept {
+            if (this != &other) {
+                this->state = other.state.load(std::memory_order_relaxed);
+            }
+            return *this;
+        }
+
+        /// Returns the current counter of the semaphore.
+        fstd::u64 counter() noexcept { return ftsk_timeline_semaphore_counter(this); }
+
+        /// Checks if the semaphore is signaled with a count greater or equal to `value`.
+        bool isSignaled(fstd::u64 value) noexcept { return ftsk_timeline_semaphore_is_signaled(this, value); }
+
+        /// Blocks the caller until the semaphore reaches a count greater or equal to `value`.
+        void wait(fstd::u64 value) noexcept { return ftsk_timeline_semaphore_wait(this, value); }
+
+        /// Blocks the caller until the semaphore reaches a count greater or equal to `value`, or the timeout expires.
+        bool waitFor(fstd::u64 value, const fstd::Duration &timeout) noexcept {
+            return ftsk_timeline_semaphore_timed_wait(this, value, timeout);
+        }
+
+        /// Sets the internal value of the semaphore, possibly waking waiting tasks.
+        ///
+        /// `value` must be greater than the current value of the semaphore.
+        void signal(fstd::u64 value) noexcept { return ftsk_timeline_semaphore_signal(this, value); }
+    };
 } // namespace ftasks
+
 #endif
 
 #ifdef FIMO_TASKS_IMPLEMENTATION
