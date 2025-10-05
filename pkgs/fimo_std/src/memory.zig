@@ -419,6 +419,7 @@ pub const Arena = extern struct {
         } else {
             posix.munmap(@alignCast(ptr[0 .. self.reserve_len + self.page_size]));
         }
+        self.* = undefined;
     }
 
     pub fn grow(self: *Arena, len: usize) Error!void {
@@ -584,6 +585,618 @@ test Arena {
     defer arena.deinit();
 
     const allocator = arena.allocator();
+    try std.heap.testAllocator(allocator.adaptIntoStdAllocator());
+    try std.heap.testAllocatorAligned(allocator.adaptIntoStdAllocator());
+    try std.heap.testAllocatorAlignedShrink(allocator.adaptIntoStdAllocator());
+    try std.heap.testAllocatorLargeAlignment(allocator.adaptIntoStdAllocator());
+}
+
+pub const FreelistAllocator = extern struct {
+    fallback: Allocator,
+    freelist: ?*Header,
+    futex: atomic.Value(u32) = .init(unlocked),
+
+    const unlocked: u32 = 0;
+    const locked: u32 = 1;
+    const contended: u32 = 2;
+
+    const allocator_vtable: Allocator.VTable = .{
+        .alloc = alloc,
+        .resize = resize,
+        .remap = remap,
+        .free = free,
+    };
+
+    const Header = struct {
+        size: usize,
+        next: ?*Header,
+    };
+
+    pub fn init(fallback: Allocator) FreelistAllocator {
+        return .{
+            .fallback = fallback,
+            .freelist = null,
+        };
+    }
+
+    pub fn deinit(self: *FreelistAllocator) void {
+        var current = self.freelist;
+        while (current) |header| {
+            current = header.next;
+            const buffer: [*]align(@alignOf(Header)) u8 = @ptrCast(header);
+            self.fallback.free(buffer[0..header.size]);
+        }
+        self.* = undefined;
+    }
+
+    fn lock(self: *FreelistAllocator) void {
+        if (self.futex.cmpxchgWeak(unlocked, locked, .acquire, .monotonic)) |v| {
+            var orig = v;
+            while (true) {
+                if (orig == unlocked) {
+                    orig = self.futex.cmpxchgWeak(
+                        unlocked,
+                        locked,
+                        .acquire,
+                        .monotonic,
+                    ) orelse return;
+                    continue;
+                }
+
+                if (orig & contended == 0) {
+                    if (self.futex.cmpxchgWeak(orig, orig | contended, .acquire, .monotonic)) |n| {
+                        orig = n;
+                        continue;
+                    }
+                }
+
+                Thread.Futex.wait(&self.futex, contended);
+                orig = self.futex.load(.monotonic);
+            }
+        }
+    }
+
+    fn unlock(self: *FreelistAllocator) void {
+        const state = self.futex.swap(unlocked, .release);
+        if (state & contended != 0) Thread.Futex.wake(&self.futex, 1);
+    }
+
+    fn getHeaderPtr(ptr: [*]u8) **Header {
+        return @ptrCast(@alignCast(ptr - @sizeOf(usize)));
+    }
+
+    fn getHeader(ptr: [*]u8) *Header {
+        return getHeaderPtr(ptr).*;
+    }
+
+    fn alloc(ptr: ?*anyopaque, len: usize, alignment: usize) callconv(.c) ?[*]u8 {
+        const self: *FreelistAllocator = @ptrCast(@alignCast(ptr));
+
+        self.lock();
+        defer self.unlock();
+
+        var link: *?*Header = &self.freelist;
+        var current = self.freelist;
+        while (current) |node| {
+            if (node.size >= len + alignment - 1 + @sizeOf(Header) + @sizeOf(usize)) {
+                link.* = node.next;
+                const unaligned_ptr: [*]u8 = @ptrCast(node);
+                const unaligned_addr = @intFromPtr(unaligned_ptr);
+                const aligned_addr = std.mem.alignForward(usize, unaligned_addr + @sizeOf(Header) + @sizeOf(usize), alignment);
+                const aligned_ptr = unaligned_ptr + (aligned_addr - unaligned_addr);
+                getHeaderPtr(aligned_ptr).* = node;
+                return aligned_ptr;
+            } else {
+                link = &node.next;
+                current = node.next;
+            }
+        }
+
+        const alloc_size = len + alignment - 1 + @sizeOf(Header) + @sizeOf(usize);
+        const buffer = self.fallback.alignedAlloc(u8, .of(Header), alloc_size) catch return null;
+        const header: *Header = @ptrCast(buffer);
+        header.* = .{
+            .size = alloc_size,
+            .next = null,
+        };
+
+        const unaligned_ptr: [*]u8 = @ptrCast(header);
+        const unaligned_addr = @intFromPtr(unaligned_ptr);
+        const aligned_addr = std.mem.alignForward(usize, unaligned_addr + @sizeOf(Header) + @sizeOf(usize), alignment);
+        const aligned_ptr = unaligned_ptr + (aligned_addr - unaligned_addr);
+        getHeaderPtr(aligned_ptr).* = header;
+        return aligned_ptr;
+    }
+
+    fn resize(ptr: ?*anyopaque, memory: Memory, alignment: usize, new_len: usize) callconv(.c) bool {
+        if (memory.len == 0 or new_len == 0) return false;
+        if (new_len <= memory.len) return true;
+        const self: *FreelistAllocator = @ptrCast(@alignCast(ptr));
+        const header = getHeader(memory.ptr.?);
+        const offset = @intFromPtr(memory.ptr) - @intFromPtr(header);
+        const remaining_len = header.size - offset;
+        if (remaining_len >= new_len - memory.len) return true;
+
+        const block = @as([*]u8, @ptrCast(header))[0..header.size];
+        const fallback_len = new_len + alignment - 1 + @sizeOf(Header) + @sizeOf(usize);
+        if (self.fallback.rawResize(block, .of(Header), fallback_len)) {
+            header.size = fallback_len;
+            return true;
+        }
+        return false;
+    }
+
+    fn remap(ptr: ?*anyopaque, memory: Memory, alignment: usize, new_len: usize) callconv(.c) ?[*]u8 {
+        if (memory.len == 0 or new_len == 0) return null;
+        if (new_len <= memory.len) return memory.ptr;
+        const self: *FreelistAllocator = @ptrCast(@alignCast(ptr));
+        const header = getHeader(memory.ptr.?);
+        const offset = @intFromPtr(memory.ptr) - @intFromPtr(header);
+        const remaining_len = header.size - offset;
+        if (remaining_len >= new_len - memory.len) return memory.ptr;
+
+        const block = @as([*]u8, @ptrCast(header))[0..header.size];
+        const fallback_len = new_len + alignment - 1 + @sizeOf(Header) + @sizeOf(usize);
+        const unaligned_ptr = self.fallback.rawRemap(block, .of(Header), fallback_len) orelse return null;
+        const new_header: *Header = @ptrCast(@alignCast(unaligned_ptr));
+        new_header.* = .{
+            .size = fallback_len,
+            .next = null,
+        };
+
+        const unaligned_addr = @intFromPtr(unaligned_ptr);
+        const aligned_addr = std.mem.alignForward(usize, unaligned_addr + @sizeOf(Header) + @sizeOf(usize), alignment);
+        const aligned_ptr = unaligned_ptr + (aligned_addr - unaligned_addr);
+        getHeaderPtr(aligned_ptr).* = new_header;
+        return aligned_ptr;
+    }
+
+    fn free(ptr: ?*anyopaque, memory: Memory, alignment: usize) callconv(.c) void {
+        _ = alignment;
+        if (memory.len == 0) return;
+        const self: *FreelistAllocator = @ptrCast(@alignCast(ptr));
+
+        self.lock();
+        defer self.unlock();
+
+        const header = getHeader(memory.ptr.?);
+        header.next = self.freelist;
+        self.freelist = header;
+    }
+
+    pub fn allocator(self: *FreelistAllocator) Allocator {
+        return .{ .ptr = self, .vtable = &allocator_vtable };
+    }
+};
+
+test FreelistAllocator {
+    const fallback = Allocator.adaptFromStdAllocator(&std.testing.allocator);
+    var freelist = FreelistAllocator.init(fallback);
+    defer freelist.deinit();
+
+    const allocator = freelist.allocator();
+    try std.heap.testAllocator(allocator.adaptIntoStdAllocator());
+    try std.heap.testAllocatorAligned(allocator.adaptIntoStdAllocator());
+    try std.heap.testAllocatorAlignedShrink(allocator.adaptIntoStdAllocator());
+    try std.heap.testAllocatorLargeAlignment(allocator.adaptIntoStdAllocator());
+}
+
+pub const BuddyAllocator = extern struct {
+    freelist: FreelistAllocator,
+    futex: atomic.Value(u32) = .init(unlocked),
+    block_size: usize,
+    max_order: u8,
+    pages: ?*Page,
+
+    const unlocked: u32 = 0;
+    const locked: u32 = 1;
+    const contended: u32 = 2;
+
+    const min_block_size = 16;
+    const max_supported_order = 20;
+    const allocator_vtable: Allocator.VTable = .{
+        .alloc = alloc,
+        .resize = resize,
+        .remap = remap,
+        .free = free,
+    };
+
+    const Block = packed struct(u64) {
+        idx: u20,
+        prev: u20,
+        next: u20,
+        has_prev: bool,
+        has_next: bool,
+        _unused: u2 = 0,
+    };
+
+    pub const Page = extern struct {
+        blocks: [*]u8,
+        bit_tree: [*]u8,
+        free_lists: [max_supported_order]?*Block = @splat(null),
+        next: ?*Page = null,
+
+        fn checkBit(self: *Page, max_order: u8, order: u8, index: u20) bool {
+            const order_start: usize = (@as(usize, 1) << @truncate(max_order - order)) - 1;
+            const bit_index = order_start + index;
+            const byte_index = @divTrunc(bit_index, 8);
+            const bit_offset = @rem(bit_index, 8);
+            const byte = self.bit_tree[byte_index];
+            return (byte & (@as(u8, 1) << @truncate(bit_offset))) != 0;
+        }
+
+        fn setBit(self: *Page, max_order: u8, order: u8, index: u20) void {
+            const order_start: usize = (@as(usize, 1) << @truncate(max_order - order)) - 1;
+            const bit_index = order_start + index;
+            const byte_index = @divTrunc(bit_index, 8);
+            const bit_offset = @rem(bit_index, 8);
+            std.debug.assert((self.bit_tree[byte_index] & (@as(u8, 1) << @truncate(bit_offset))) == 0);
+            self.bit_tree[byte_index] |= @as(u8, 1) << @truncate(bit_offset);
+        }
+
+        fn clearBit(self: *Page, max_order: u8, order: u8, index: u20) void {
+            const order_start: usize = (@as(usize, 1) << @truncate(max_order - order)) - 1;
+            const bit_index = order_start + index;
+            const byte_index = @divTrunc(bit_index, 8);
+            const bit_offset = @rem(bit_index, 8);
+            std.debug.assert((self.bit_tree[byte_index] & (@as(u8, 1) << @truncate(bit_offset))) != 0);
+            self.bit_tree[byte_index] &= ~(@as(u8, 1) << @truncate(bit_offset));
+        }
+
+        fn flattenBlockIdx(order: u8, index: u20) usize {
+            return @as(usize, index) << @truncate(order);
+        }
+
+        fn allocateBlock(self: *Page, max_order: u8, order: u8, block_size: usize) ?[*]u8 {
+            // Try to take the block from the free list directly.
+            if (self.free_lists[order]) |block| {
+                std.debug.assert(!block.has_prev);
+                self.clearBit(max_order, order, block.idx);
+                if (block.has_next) {
+                    const next_idx = block.next;
+                    const next_idx_flat = flattenBlockIdx(order, next_idx);
+                    const offset = next_idx_flat * block_size;
+                    const next: *Block = @ptrCast(@alignCast(self.blocks + offset));
+                    next.has_prev = false;
+                    self.free_lists[order] = next;
+                } else {
+                    self.free_lists[order] = null;
+                }
+                const bytes: []u8 = @ptrCast(block);
+                @memset(bytes, 0);
+                return bytes.ptr;
+            }
+
+            // If no block of the current order is available, we try
+            // splitting blocks of higher order.
+            var split_order: ?u8 = null;
+            for (order + 1..max_order + 1) |i| {
+                if (self.free_lists[i] != null) {
+                    split_order = @truncate(i);
+                    break;
+                }
+            }
+
+            // If no block was found, we quit.
+            var current_order = split_order orelse return null;
+            const block = self.free_lists[current_order].?;
+            if (block.has_next) {
+                const next_idx = block.next;
+                const next_idx_flat = flattenBlockIdx(current_order, next_idx);
+                const offset = next_idx_flat * block_size;
+                const next: *Block = @ptrCast(@alignCast(self.blocks + offset));
+                next.has_prev = false;
+                self.free_lists[current_order] = next;
+            } else {
+                self.free_lists[current_order] = null;
+            }
+
+            // At each step we half the size of the block and
+            // insert it into the free list of the size class.
+            // We know that the free lists must be empty.
+            self.clearBit(max_order, current_order, block.idx);
+            while (current_order > order) {
+                current_order -= 1;
+
+                const block_idx = 2 * block.idx;
+                const buddy_idx = block_idx + 1;
+                const buddy_idx_flat = flattenBlockIdx(current_order, buddy_idx);
+                const buddy_offset = buddy_idx_flat * block_size;
+                const buddy: *Block = @ptrCast(@alignCast(self.blocks + buddy_offset));
+
+                block.* = .{
+                    .idx = block_idx,
+                    .prev = 0,
+                    .has_prev = false,
+                    .next = 0,
+                    .has_next = false,
+                };
+                buddy.* = .{
+                    .idx = buddy_idx,
+                    .prev = 0,
+                    .has_prev = false,
+                    .next = 0,
+                    .has_next = false,
+                };
+                self.free_lists[current_order] = buddy;
+                self.setBit(max_order, current_order, buddy_idx);
+            }
+
+            const bytes: []u8 = @ptrCast(block);
+            @memset(bytes, 0);
+            return bytes.ptr;
+        }
+
+        fn deallocateBlock(
+            self: *Page,
+            max_order: u8,
+            order: u8,
+            block_size: usize,
+            flat_block_idx: usize,
+        ) void {
+            const block_offset = flat_block_idx * block_size;
+            var block: *Block = @ptrCast(@alignCast(self.blocks + block_offset));
+            block.* = .{
+                .idx = @truncate(flat_block_idx >> @truncate(order)),
+                .prev = 0,
+                .has_prev = false,
+                .next = 0,
+                .has_next = false,
+            };
+
+            // Try to coalesce the block with its buddy.
+            for (order..max_order + 1) |i| {
+                const buddy_idx = if ((block.idx & 1) == 0) block.idx + 1 else block.idx - 1;
+                // If the buddy is not free we simply insert the block into the free list.
+                if (!self.checkBit(max_order, @truncate(i), buddy_idx)) {
+                    const next_idx, const has_next = if (self.free_lists[i]) |next| blk: {
+                        next.prev = block.idx;
+                        next.has_prev = true;
+                        break :blk .{ next.idx, true };
+                    } else .{ 0, false };
+
+                    block.next = next_idx;
+                    block.has_next = has_next;
+                    self.free_lists[i] = block;
+                    self.setBit(max_order, @truncate(i), block.idx);
+                    return;
+                }
+
+                // If the buddy is free we must remove it from the free list.
+                self.clearBit(max_order, @truncate(i), buddy_idx);
+                const buddy_idx_flat = flattenBlockIdx(@truncate(i), buddy_idx);
+                const buddy_offset = buddy_idx_flat * block_size;
+                const buddy: *Block = @ptrCast(@alignCast(self.blocks + buddy_offset));
+                if (buddy.has_prev) {
+                    const prev_idx = buddy.prev;
+                    const prev_idx_flat = flattenBlockIdx(@truncate(i), prev_idx);
+                    const prev_offset = prev_idx_flat * block_size;
+                    const prev: *Block = @ptrCast(@alignCast(self.blocks + prev_offset));
+                    prev.next = buddy.next;
+                    prev.has_next = buddy.has_next;
+                } else {
+                    std.debug.assert(self.free_lists[i] == buddy);
+                    self.free_lists[i] = null;
+                }
+
+                block = if ((buddy_idx & 1) == 1) block else buddy;
+                block.idx /= 2;
+            }
+        }
+    };
+
+    pub fn init(fallback: Allocator, block_size: usize, page_size: usize) !BuddyAllocator {
+        const rounded_block_size = @max(min_block_size, try std.math.ceilPowerOfTwo(usize, block_size));
+        const rounded_page_size = @max(rounded_block_size, try std.math.ceilPowerOfTwo(usize, page_size));
+        const max_order = @ctz(rounded_page_size) - @ctz(rounded_block_size);
+        if (max_order > max_supported_order) return error.UnsupportedSizeCombination;
+        return .{
+            .freelist = FreelistAllocator.init(fallback),
+            .block_size = rounded_block_size,
+            .max_order = max_order,
+            .pages = null,
+        };
+    }
+
+    pub fn deinit(self: *BuddyAllocator) void {
+        const num_blocks: usize = @as(usize, 1) << @truncate(self.max_order);
+        const bit_tree_elements = (num_blocks * 2) - 1;
+        const blocks_memory_size = self.block_size * num_blocks;
+        const blocks_offset = std.mem.alignForward(usize, @sizeOf(Page) + bit_tree_elements, self.block_size);
+        const page_size = blocks_offset + blocks_memory_size;
+
+        var current = self.pages;
+        while (current) |page| {
+            current = page.next;
+            const ptr: [*]u8 = @ptrCast(page);
+            self.freelist.fallback.rawFree(ptr[0..page_size], .fromByteUnits(self.block_size));
+        }
+        self.freelist.deinit();
+        self.* = undefined;
+    }
+
+    fn lock(self: *BuddyAllocator) void {
+        if (self.futex.cmpxchgWeak(unlocked, locked, .acquire, .monotonic)) |v| {
+            var orig = v;
+            while (true) {
+                if (orig == unlocked) {
+                    orig = self.futex.cmpxchgWeak(
+                        unlocked,
+                        locked,
+                        .acquire,
+                        .monotonic,
+                    ) orelse return;
+                    continue;
+                }
+
+                if (orig & contended == 0) {
+                    if (self.futex.cmpxchgWeak(orig, orig | contended, .acquire, .monotonic)) |n| {
+                        orig = n;
+                        continue;
+                    }
+                }
+
+                Thread.Futex.wait(&self.futex, contended);
+                orig = self.futex.load(.monotonic);
+            }
+        }
+    }
+
+    fn unlock(self: *BuddyAllocator) void {
+        const state = self.futex.swap(unlocked, .release);
+        if (state & contended != 0) Thread.Futex.wake(&self.futex, 1);
+    }
+
+    fn blockOrderForSize(self: *BuddyAllocator, len: usize, alignment: usize) u8 {
+        const block_size = if (alignment <= self.block_size)
+            std.math.ceilPowerOfTwoAssert(usize, @max(len, self.block_size))
+        else
+            std.math.ceilPowerOfTwoAssert(usize, @max(len + alignment - 1, self.block_size));
+        return @ctz(block_size) - @ctz(self.block_size);
+    }
+
+    fn alloc(ptr: ?*anyopaque, len: usize, alignment: usize) callconv(.c) ?[*]u8 {
+        const self: *BuddyAllocator = @ptrCast(@alignCast(ptr));
+        if (len == 0) return null;
+        const block_order = self.blockOrderForSize(len, alignment);
+        if (block_order > self.max_order)
+            return FreelistAllocator.alloc(&self.freelist, len, alignment);
+
+        self.lock();
+        defer self.unlock();
+
+        var link: *?*Page = &self.pages;
+        var current = self.pages;
+        while (true) {
+            const page = current orelse blk: {
+                const num_blocks: usize = @as(usize, 1) << @truncate(self.max_order);
+                const bit_tree_elements = (num_blocks * 2) - 1;
+                const blocks_memory_size = self.block_size * num_blocks;
+                const blocks_offset = std.mem.alignForward(usize, @sizeOf(Page) + bit_tree_elements, self.block_size);
+                const allocation_size = blocks_offset + blocks_memory_size;
+                const page_bytes = self.freelist.fallback.rawAlloc(
+                    allocation_size,
+                    .fromByteUnits(self.block_size),
+                ) orelse return null;
+
+                const p: *Page = @ptrCast(@alignCast(page_bytes));
+                p.* = .{
+                    .blocks = page_bytes + blocks_offset,
+                    .bit_tree = page_bytes + @sizeOf(Page),
+                };
+
+                const super_block: *Block = @ptrCast(@alignCast(p.blocks));
+                super_block.* = .{
+                    .idx = 0,
+                    .prev = 0,
+                    .has_prev = false,
+                    .next = 0,
+                    .has_next = false,
+                };
+                p.setBit(self.max_order, self.max_order, 0);
+                p.free_lists[self.max_order] = super_block;
+
+                link.* = p;
+                break :blk p;
+            };
+
+            if (page.allocateBlock(self.max_order, block_order, self.block_size)) |block| {
+                // NOTE(gabriel): Blocks are always aligned to the block-size.
+                // For overallocated buffers, we allocate a bigger block and
+                // return an allocated pointer inside the block.
+                if (alignment <= self.block_size)
+                    return block
+                else {
+                    const unaligned_addr = @intFromPtr(block);
+                    const aligned_addr = std.mem.alignForward(usize, unaligned_addr + @sizeOf(usize), alignment);
+                    return block + (aligned_addr - unaligned_addr);
+                }
+            }
+            link = &page.next;
+            current = page.next;
+        }
+    }
+
+    fn resize(ptr: ?*anyopaque, memory: Memory, alignment: usize, new_len: usize) callconv(.c) bool {
+        if (memory.len == 0) return false;
+        const self: *BuddyAllocator = @ptrCast(@alignCast(ptr));
+        const old_block_order = self.blockOrderForSize(memory.len, alignment);
+        if (old_block_order > self.max_order)
+            return FreelistAllocator.resize(&self.freelist, memory, alignment, new_len);
+        const new_block_order = self.blockOrderForSize(new_len, alignment);
+        return old_block_order == new_block_order;
+    }
+
+    fn remap(ptr: ?*anyopaque, memory: Memory, alignment: usize, new_len: usize) callconv(.c) ?[*]u8 {
+        if (memory.len == 0) return null;
+        const self: *BuddyAllocator = @ptrCast(@alignCast(ptr));
+        const old_block_order = self.blockOrderForSize(memory.len, alignment);
+        if (old_block_order > self.max_order)
+            return FreelistAllocator.remap(&self.freelist, memory, alignment, new_len);
+        const new_block_order = self.blockOrderForSize(new_len, alignment);
+        return if (old_block_order == new_block_order) memory.ptr else null;
+    }
+
+    fn free(ptr: ?*anyopaque, memory: Memory, alignment: usize) callconv(.c) void {
+        if (memory.len == 0) return;
+        const self: *BuddyAllocator = @ptrCast(@alignCast(ptr));
+        const block_order = self.blockOrderForSize(memory.len, alignment);
+        if (block_order > self.max_order)
+            return FreelistAllocator.free(&self.freelist, memory, alignment);
+        const num_blocks: usize = @as(usize, 1) << @truncate(self.max_order);
+        const max_offset = num_blocks * self.block_size;
+        const address = @intFromPtr(memory.ptr);
+
+        self.lock();
+        defer self.unlock();
+
+        var current = self.pages;
+        while (current) |page| : (current = page.next) {
+            const start = @intFromPtr(page.blocks);
+            const end = start + max_offset;
+            if (address < start or address > end) continue;
+
+            const offset = address - start;
+            // NOTE(gabriel): For overallocated buffers, the allocation
+            // is done post hoc, which may lead to pointers pointing
+            // in the middle of an allocated block.
+            const block_idx = if (alignment <= self.block_size) blk: {
+                // NOTE(gabriel): This is a division by a power of two:
+                //
+                // idx = offset / self.block_size
+                break :blk offset >> @truncate(@ctz(self.block_size));
+            } else blk: {
+                // NOTE(gabriel):
+                //
+                // Shift the pointer to the beginning of the block:
+                // block_start = (offset / block_size) * block_size
+                //
+                // Then we compute the index, like before:
+                // idx = block_start / self.block_size
+                const block_size = self.block_size << @truncate(block_order);
+                const clear_bits = @ctz(block_size);
+                const shift = clear_bits - @ctz(self.block_size);
+                break :blk (offset >> @truncate(clear_bits)) << @truncate(shift);
+            };
+            page.deallocateBlock(self.max_order, block_order, self.block_size, block_idx);
+            return;
+        }
+        unreachable;
+    }
+
+    pub fn allocator(self: *BuddyAllocator) Allocator {
+        return .{ .ptr = self, .vtable = &allocator_vtable };
+    }
+};
+
+test BuddyAllocator {
+    const fallback = Allocator.adaptFromStdAllocator(&std.testing.allocator);
+    const block_size = 256;
+    const page_size = 1024 * 1024;
+    var buddy = try BuddyAllocator.init(fallback, block_size, page_size);
+    defer buddy.deinit();
+
+    const allocator = buddy.allocator();
     try std.heap.testAllocator(allocator.adaptIntoStdAllocator());
     try std.heap.testAllocatorAligned(allocator.adaptIntoStdAllocator());
     try std.heap.testAllocatorAlignedShrink(allocator.adaptIntoStdAllocator());

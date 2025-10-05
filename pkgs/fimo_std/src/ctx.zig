@@ -8,6 +8,7 @@ const AnyResult = AnyError.AnyResult;
 const Inner = @import("context.zig");
 const memory = @import("memory.zig");
 const Arena = memory.Arena;
+const Allocator = memory.Allocator;
 const modules = @import("modules.zig");
 const tasks = @import("tasks.zig");
 const tracing = @import("tracing.zig");
@@ -131,7 +132,10 @@ pub const CoreCfg = extern struct {
 pub const CoreVTable = extern struct {
     deinit: *const fn () callconv(.c) void,
     get_global_arena: *const fn () callconv(.c) *Arena,
+    get_page_allocator: *const fn () callconv(.c) Allocator,
     get_scratch_arena: *const fn (conflict: ?*Arena) callconv(.c) *Arena,
+    set_custom_scratch_arenas: *const fn (first: *Arena, second: *Arena) callconv(.c) void,
+    unset_custom_scratch_arenas: *const fn () callconv(.c) void,
     has_error_result: *const fn () callconv(.c) bool,
     replace_result: *const fn (new: AnyResult) callconv(.c) AnyResult,
 };
@@ -173,6 +177,16 @@ pub fn getGlobalArena() *Arena {
     return handle.core_v0.get_global_arena();
 }
 
+/// Returns an allocator for allocating buffers at the page granularity of the current system.
+///
+/// The allocator is backed by the global arena. The allocator implementation is allowed to
+/// request chunks larger than one page size from the arena. The minimum alignment of an
+/// allocation is the page size.
+pub fn getPageAllocator() Allocator {
+    const handle = Handle.getHandle();
+    return handle.core_v0.get_page_allocator();
+}
+
 /// Returns the scratch arena for the current thread.
 ///
 /// The scratch arena will be initialized the first time the thread calls this function.
@@ -181,6 +195,25 @@ pub fn getGlobalArena() *Arena {
 pub fn getScratchArena(conflict: ?*Arena) *Arena {
     const handle = Handle.getHandle();
     return handle.core_v0.get_scratch_arena(conflict);
+}
+
+/// Sets a custom scratch arena set for the calling thread.
+///
+/// A usecase for this function is exposing custom arenas for worker threads in a job system.
+/// Extending the size of the preconfigured scratch arenas is not an indented usecase.
+/// May only be called if no custom arenas are currently set.
+pub fn setCustomScratchArenas(first: *Arena, second: *Arena) void {
+    const handle = Handle.getHandle();
+    return handle.core_v0.set_custom_scratch_arenas(first, second);
+}
+
+/// Removes the custom scratch arenas for the calling thread.
+///
+/// After this call `getScratchArena` will return one of the arenas managed by the context.
+/// A custom arena pair must have been set previously.
+pub fn unsetCustomScratchArenas() void {
+    const handle = Handle.getHandle();
+    return handle.core_v0.unset_custom_scratch_arenas();
 }
 
 /// Checks whether the context has an error stored for the current thread.

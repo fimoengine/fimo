@@ -1563,7 +1563,10 @@ typedef struct {
 typedef struct {
     void (*deinit)(void);
     FSTD_Arena *(*get_global_arena)(void);
+    FSTD_Allocator (*get_page_allocator)(void);
     FSTD_Arena *(*get_scratch_arena)(FSTD_Arena *FSTD_MAYBE_NULL conflict);
+    void (*set_custom_scratch_arenas)(FSTD_Arena *first, FSTD_Arena *second);
+    void (*unset_custom_scratch_arenas)(void);
     bool (*has_error_result)(void);
     FSTD_Result (*replace_result)(FSTD_Result new_result);
 } FSTD_CoreVtable;
@@ -1589,12 +1592,32 @@ fstd_func FSTD_Version fstd_ctx_get_version(void);
 /// Returns the global arena shared by all threads.
 fstd_func FSTD_Arena *fstd_ctx_get_global_arena(void);
 
+/// Returns an allocator for allocating buffers at the page granularity of the current system.
+///
+/// The allocator is backed by the global arena. The allocator implementation is allowed to
+/// request chunks larger than one page size from the arena. The minimum alignment of an
+/// allocation is the page size.
+fstd_func FSTD_Allocator fstd_ctx_get_page_allocator(void);
+
 /// Returns the scratch arena for the current thread.
 ///
 /// The scratch arena will be initialized the first time the thread calls this function.
 /// The arena is owned by the calling thread and will be invalidated on thread exit
 /// or after the context is deinitialized.
 fstd_func FSTD_Arena *fstd_ctx_get_scratch_arena(FSTD_Arena *FSTD_MAYBE_NULL conflict);
+
+/// Sets a custom scratch arena set for the calling thread.
+///
+/// A usecase for this function is exposing custom arenas for worker threads in a job system.
+/// Extending the size of the preconfigured scratch arenas is not an indented usecase.
+/// May only be called if no custom arenas are currently set.
+fstd_func void fstd_ctx_set_custom_scratch_arenas(FSTD_Arena *first, FSTD_Arena *second);
+
+/// Removes the custom scratch arenas for the calling thread.
+///
+/// After this call `getScratchArena` will return one of the arenas managed by the context.
+/// A custom arena pair must have been set previously.
+fstd_func void fstd_ctx_unset_custom_scratch_arenas(void);
 
 /// Checks whether the context has an error stored for the current thread.
 fstd_func bool fstd_ctx_has_error_result(void);
@@ -5686,9 +5709,14 @@ namespace fstd {
 
         inline static Version getVersion() noexcept { return fstd_ctx_get_version(); }
         inline static Arena &getGlobalArena() noexcept { return *static_cast<Arena *>(fstd_ctx_get_global_arena()); }
+        inline static Allocator getPageAllocator() noexcept { return fstd_ctx_get_page_allocator(); }
         inline static Arena &getScratchArena(Arena *conflict) noexcept {
             return *static_cast<Arena *>(fstd_ctx_get_scratch_arena(conflict));
         }
+        inline static void setCustomScratchArenas(Arena &first, Arena &second) noexcept {
+            return fstd_ctx_set_custom_scratch_arenas(&first, &second);
+        }
+        inline static void unsetCustomScratchArenas() noexcept { return fstd_ctx_unset_custom_scratch_arenas(); }
         inline static bool hasErrorResult() noexcept { return fstd_ctx_has_error_result(); }
         inline static Result hasErrorResult(Result new_result) noexcept { return fstd_ctx_replace_result(new_result); }
         inline static Result takeResult() noexcept { return fstd_ctx_take_result(); }
@@ -7878,14 +7906,29 @@ fstd_func_impl FSTD_Version fstd_ctx_get_version(void) {
     return handle->get_version();
 }
 
-fstd_func FSTD_Arena *fstd_ctx_get_global_arena(void) {
+fstd_func_impl FSTD_Arena *fstd_ctx_get_global_arena(void) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->core_v0.get_global_arena();
 }
 
-fstd_func FSTD_Arena *fstd_ctx_get_scratch_arena(FSTD_Arena *FSTD_MAYBE_NULL conflict) {
+fstd_func_impl FSTD_Allocator fstd_ctx_get_page_allocator(void) {
+    FSTD_Ctx *handle = fstd_ctx_get();
+    return handle->core_v0.get_page_allocator();
+}
+
+fstd_func_impl FSTD_Arena *fstd_ctx_get_scratch_arena(FSTD_Arena *FSTD_MAYBE_NULL conflict) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->core_v0.get_scratch_arena(conflict);
+}
+
+fstd_func_impl void fstd_ctx_set_custom_scratch_arenas(FSTD_Arena *first, FSTD_Arena *second) {
+    FSTD_Ctx *handle = fstd_ctx_get();
+    return handle->core_v0.set_custom_scratch_arenas(first, second);
+}
+
+fstd_func_impl void fstd_ctx_unset_custom_scratch_arenas(void) {
+    FSTD_Ctx *handle = fstd_ctx_get();
+    return handle->core_v0.unset_custom_scratch_arenas();
 }
 
 fstd_func_impl bool fstd_ctx_has_error_result(void) {

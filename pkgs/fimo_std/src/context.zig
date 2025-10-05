@@ -13,6 +13,7 @@ const tasks = @import("context/tasks.zig");
 const tracing = @import("context/tracing.zig");
 const memory = @import("memory.zig");
 const Arena = memory.Arena;
+const BuddyAllocator = memory.BuddyAllocator;
 const pub_ctx = @import("ctx.zig");
 const pub_modules = @import("modules.zig");
 const pub_tracing = @import("tracing.zig");
@@ -24,9 +25,11 @@ const Self = @This();
 
 const default_global_arena_reserve = 1024 * 1024 * 1024 * 64; // 64 GiB
 const default_scratch_arena_reserve = 1024 * 1024 * 1024 * 1; // 1 GiB
+const page_allocator_max_page_size = 1024 * 1024 * 1024 * 1; // 1 GiB
 
 var lock: std.Thread.Mutex = .{};
 var arena: Arena = undefined;
+var page_allocator: BuddyAllocator = undefined;
 var scratch_reserve: usize = undefined;
 var scratch_commit: usize = undefined;
 pub var is_init: bool = false;
@@ -45,6 +48,7 @@ pub var allocator = switch (builtin.mode) {
 pub const ThreadData = struct {
     result: AnyResult = .ok,
     arenas_init: bool = false,
+    custom_arenas: [2]?*Arena = @splat(null),
     arenas: [2]Arena = @splat(undefined),
     tracing: ?tracing.ThreadData = null,
     node: std.SinglyLinkedList.Node = .{},
@@ -57,7 +61,24 @@ pub const ThreadData = struct {
         return Impl.getOrInit();
     }
 
+    fn unsetCustomScratchArenas(self: *ThreadData) void {
+        std.debug.assert(self.custom_arenas[0] != null);
+        self.custom_arenas = @splat(null);
+    }
+
+    fn setCustomScratchArenas(self: *ThreadData, first: *Arena, second: *Arena) void {
+        std.debug.assert(first != second);
+        self.custom_arenas = .{ first, second };
+    }
+
     fn getScratchArena(self: *ThreadData, conflict: ?*Arena) *Arena {
+        if (self.custom_arenas[0] != null) {
+            return if (conflict == self.custom_arenas[0])
+                self.custom_arenas[1].?
+            else
+                self.custom_arenas[0].?;
+        }
+
         if (!self.arenas_init) {
             self.arenas[0] = Arena.init(.{
                 .reserve = scratch_reserve,
@@ -87,6 +108,7 @@ pub const ThreadData = struct {
     }
 
     fn onThreadExit(self: *ThreadData) void {
+        std.debug.assert(self.custom_arenas[0] == null);
         if (self.arenas_init) {
             self.arenas[0].deinit();
             self.arenas[1].deinit();
@@ -225,6 +247,8 @@ pub fn init(options: []const *const pub_ctx.Cfg) !void {
     scratch_reserve = scratch_arena_reserve;
     scratch_commit = cfg.scratch_arena_commit;
     arena = try .init(.{ .reserve = global_arena_reserve, .commit = cfg.global_arena_commit });
+    errdefer arena.deinit();
+    page_allocator = try .init(arena.allocator(), arena.page_size, page_allocator_max_page_size);
 
     try tracing.init(tracing_cfg orelse &.{});
     errdefer tracing.deinit();
@@ -272,10 +296,27 @@ pub fn getArena() *Arena {
     return &arena;
 }
 
+pub fn getPageAllocator() memory.Allocator {
+    std.debug.assert(is_init);
+    return page_allocator.allocator();
+}
+
 pub fn getScratchArena(conflict: ?*Arena) *Arena {
     std.debug.assert(is_init);
     const data = ThreadData.getOrInit();
     return data.getScratchArena(conflict);
+}
+
+pub fn setCustomScratchArenas(first: *Arena, second: *Arena) void {
+    std.debug.assert(is_init);
+    const data = ThreadData.getOrInit();
+    data.setCustomScratchArenas(first, second);
+}
+
+pub fn unsetCustomScratchArenas() void {
+    std.debug.assert(is_init);
+    const data = ThreadData.getOrInit();
+    data.unsetCustomScratchArenas();
 }
 
 pub fn hasErrorResult() bool {
@@ -321,8 +362,17 @@ const HandleImpl = struct {
     fn getGlobalArena() callconv(.c) *Arena {
         return Self.getArena();
     }
+    fn getPageAllocator() callconv(.c) memory.Allocator {
+        return Self.getPageAllocator();
+    }
     fn getScratchArena(conflict: ?*Arena) callconv(.c) *Arena {
         return Self.getScratchArena(conflict);
+    }
+    fn setCustomScratchArenas(first: *Arena, second: *Arena) callconv(.c) void {
+        return Self.setCustomScratchArenas(first, second);
+    }
+    fn unsetCustomScratchArenas() callconv(.c) void {
+        return Self.unsetCustomScratchArenas();
     }
     fn hasErrorResult() callconv(.c) bool {
         return Self.hasErrorResult();
@@ -337,7 +387,10 @@ pub var handle = pub_ctx.Handle{
     .core_v0 = .{
         .deinit = &HandleImpl.deinit,
         .get_global_arena = &HandleImpl.getGlobalArena,
+        .get_page_allocator = &HandleImpl.getPageAllocator,
         .get_scratch_arena = &HandleImpl.getScratchArena,
+        .set_custom_scratch_arenas = &HandleImpl.setCustomScratchArenas,
+        .unset_custom_scratch_arenas = &HandleImpl.unsetCustomScratchArenas,
         .has_error_result = &HandleImpl.hasErrorResult,
         .replace_result = &HandleImpl.replaceResult,
     },
