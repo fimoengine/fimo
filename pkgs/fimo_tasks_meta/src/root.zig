@@ -175,33 +175,6 @@ test "short sleep" {
     }.f);
 }
 
-/// Fetches the arena of the current task.
-pub fn taskArena() ?*Arena {
-    const sym = symbols.task_arena.getGlobal().get();
-    return sym();
-}
-
-test "task arena no task" {
-    var ctx = try testing.initTestContext();
-    defer ctx.deinit();
-    try std.testing.expectEqual(null, taskArena());
-}
-
-test "task arena in task" {
-    try testing.initTestContextInTask(struct {
-        fn f() anyerror!void {
-            try std.testing.expect(taskArena() != null);
-            const arena = taskArena().?;
-            const allocator = arena.allocator();
-
-            try std.heap.testAllocator(allocator.adaptIntoStdAllocator());
-            try std.heap.testAllocatorAligned(allocator.adaptIntoStdAllocator());
-            try std.heap.testAllocatorAlignedShrink(allocator.adaptIntoStdAllocator());
-            try std.heap.testAllocatorLargeAlignment(allocator.adaptIntoStdAllocator());
-        }
-    }.f);
-}
-
 /// A key for a task-specific-storage.
 ///
 /// A new key can be defined by casting from a stable address.

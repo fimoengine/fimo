@@ -658,11 +658,11 @@ fstd_util void ftsk_timeline_semaphore_signal(FTSK_TimelineSemaphore *tsem, FSTD
 #define FTSK__SYM_ID(name) FSTD_MODULE_SYMBOL_NS(name, FTSK_SYM_NS, FSTD_CTX_VERSION)
 #define FTSK_SYM_ALL                                                                                                   \
     FTSK_Sym_TaskId, FTSK_Sym_WorkerId, FTSK_Sym_Yield, FTSK_Sym_Abort, FTSK_Sym_CancelRequested, FTSK_Sym_Sleep,      \
-            FTSK_Sym_TaskArena, FTSK_Sym_TaskLocalSet, FTSK_Sym_TaskLocalGet, FTSK_Sym_TaskLocalClear,                 \
-            FTSK_Sym_CmdBufJoin, FTSK_Sym_CmdBufDetach, FTSK_Sym_CmdBufCancel, FTSK_Sym_CmdBufCancelDetach,            \
-            FTSK_Sym_ExecutorGlobal, FTSK_Sym_ExecutorInit, FTSK_Sym_ExecutorCurrent, FTSK_Sym_ExecutorJoin,           \
-            FTSK_Sym_ExecutorJoinRequested, FTSK_Sym_ExecutorEnqueue, FTSK_Sym_ExecutorEnqueueDetached,                \
-            FTSK_Sym_FutexWait, FTSK_Sym_FutexWaitv, FTSK_Sym_FutexWake, FTSK_Sym_FutexRequeue
+            FTSK_Sym_TaskLocalSet, FTSK_Sym_TaskLocalGet, FTSK_Sym_TaskLocalClear, FTSK_Sym_CmdBufJoin,                \
+            FTSK_Sym_CmdBufDetach, FTSK_Sym_CmdBufCancel, FTSK_Sym_CmdBufCancelDetach, FTSK_Sym_ExecutorGlobal,        \
+            FTSK_Sym_ExecutorInit, FTSK_Sym_ExecutorCurrent, FTSK_Sym_ExecutorJoin, FTSK_Sym_ExecutorJoinRequested,    \
+            FTSK_Sym_ExecutorEnqueue, FTSK_Sym_ExecutorEnqueueDetached, FTSK_Sym_FutexWait, FTSK_Sym_FutexWaitv,       \
+            FTSK_Sym_FutexWake, FTSK_Sym_FutexRequeue
 
 FSTD_SYM_FN(FTSK_Sym_TaskId, FTSK__SYM_ID("task_id"), bool, FTSK_TaskId *id)
 FSTD_SYM_FN(FTSK_Sym_WorkerId, FTSK__SYM_ID("worker_id"), bool, FTSK_Worker *id)
@@ -670,7 +670,6 @@ FSTD_SYM_FN(FTSK_Sym_Yield, FTSK__SYM_ID("yield"), void, void)
 FSTD_SYM_FN(FTSK_Sym_Abort, FTSK__SYM_ID("abort"), void, void)
 FSTD_SYM_FN(FTSK_Sym_CancelRequested, FTSK__SYM_ID("cancel_requested"), bool, void)
 FSTD_SYM_FN(FTSK_Sym_Sleep, FTSK__SYM_ID("sleep"), void, FSTD_Duration duration)
-FSTD_SYM_FN(FTSK_Sym_TaskArena, FTSK__SYM_ID("task_arena"), FSTD_Arena *FSTD_MAYBE_NULL, void)
 FSTD_SYM_FN(FTSK_Sym_TaskLocalSet, FTSK__SYM_ID("task_local_set"), void, const FTSK_TssKey *key,
             void *FSTD_MAYBE_NULL value, FTSK_TssKeyDtor FSTD_MAYBE_NULL dtor)
 FSTD_SYM_FN(FTSK_Sym_TaskLocalGet, FTSK__SYM_ID("task_local_get"), void *FSTD_MAYBE_NULL, const FTSK_TssKey *key)
@@ -715,7 +714,6 @@ namespace ftasks {
         constexpr static auto Abort = FTSK_Sym_Abort__Cxx;
         constexpr static auto CancelRequested = FTSK_Sym_CancelRequested__Cxx;
         constexpr static auto Sleep = FTSK_Sym_Sleep__Cxx;
-        constexpr static auto TaskArena = FTSK_Sym_TaskArena__Cxx;
         constexpr static auto TaskLocalSet = FTSK_Sym_TaskLocalSet__Cxx;
         constexpr static auto TaskLocalGet = FTSK_Sym_TaskLocalGet__Cxx;
         constexpr static auto TaskLocalClear = FTSK_Sym_TaskLocalClear__Cxx;
@@ -742,7 +740,6 @@ namespace ftasks {
                 Abort,
                 CancelRequested,
                 Sleep,
-                TaskArena,
                 TaskLocalSet,
                 TaskLocalGet,
                 TaskLocalClear,
@@ -818,14 +815,6 @@ namespace ftasks {
 
     /// Puts the current task or thread to sleep for the specified amount of time.
     inline static void sleep(fstd::Duration duration) noexcept { return sym::Sleep.get()(duration); }
-
-    /// Fetches the arena of the current task.
-    inline static std::optional<std::reference_wrapper<fstd::Arena>> taskArena() noexcept {
-        fstd::Arena *arena = static_cast<fstd::Arena *>(sym::TaskArena.get()());
-        if (!arena)
-            return std::nullopt;
-        return {*arena};
-    }
 
     /// A key for a task-specific-storage.
     template<typename T>
@@ -1525,7 +1514,6 @@ FSTD_SYM_FN_IMP(FTSK_Sym_Yield, void, void)
 FSTD_SYM_FN_IMP(FTSK_Sym_Abort, void, void)
 FSTD_SYM_FN_IMP(FTSK_Sym_CancelRequested, bool, void)
 FSTD_SYM_FN_IMP(FTSK_Sym_Sleep, void, FSTD_Duration duration)
-FSTD_SYM_FN_IMP(FTSK_Sym_TaskArena, FSTD_Arena *FSTD_MAYBE_NULL, void)
 FSTD_SYM_FN_IMP(FTSK_Sym_TaskLocalSet, void, const FTSK_TssKey *key, void *FSTD_MAYBE_NULL value,
                 FTSK_TssKeyDtor FSTD_MAYBE_NULL dtor)
 FSTD_SYM_FN_IMP(FTSK_Sym_TaskLocalGet, void *FSTD_MAYBE_NULL, const FTSK_TssKey *key)
@@ -1561,8 +1549,6 @@ fstd_func_impl void ftsk_abort(void) { FTSK_Sym_Abort__get()(); }
 fstd_func_impl bool ftsk_cancel_requested(void) { return FTSK_Sym_CancelRequested__get()(); }
 
 fstd_func_impl void ftsk_sleep(FSTD_Duration duration) { FTSK_Sym_Sleep__get()(duration); }
-
-fstd_func_impl FSTD_Arena *FSTD_MAYBE_NULL ftsk_task_arena(void) { return FTSK_Sym_TaskArena__get()(); }
 
 fstd_func_impl void ftsk_tss_key_set(const FTSK_TssKey *key, void *FSTD_MAYBE_NULL value,
                                      FTSK_TssKeyDtor FSTD_MAYBE_NULL dtor) {

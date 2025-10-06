@@ -40,7 +40,6 @@ pub const all_symbols = .{
     abort,
     cancel_requested,
     sleep,
-    task_arena,
 
     task_local_set,
     task_local_get,
@@ -101,12 +100,6 @@ pub const sleep = Symbol{
     .namespace = symbol_namespace,
     .version = ctx.context_version,
     .T = fn (duration: Duration) callconv(.c) void,
-};
-pub const task_arena = Symbol{
-    .name = "task_arena",
-    .namespace = symbol_namespace,
-    .version = ctx.context_version,
-    .T = fn () callconv(.c) ?*Arena,
 };
 
 pub const task_local_set = Symbol{

@@ -91,7 +91,6 @@ pub const fimo_exports = .{
     .{ .symbol = symbols.abort, .value = &abort },
     .{ .symbol = symbols.cancel_requested, .value = &cancelRequested },
     .{ .symbol = symbols.sleep, .value = &sleep },
-    .{ .symbol = symbols.task_arena, .value = &taskArena },
     .{ .symbol = symbols.task_local_set, .value = &taskLocalSet },
     .{ .symbol = symbols.task_local_get, .value = &taskLocalGet },
     .{ .symbol = symbols.task_local_clear, .value = &taskLocalClear },

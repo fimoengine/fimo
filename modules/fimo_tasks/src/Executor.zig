@@ -133,7 +133,8 @@ const MemoryPool = struct {
 
     const Node = struct {
         stack: Stack,
-        arena: Arena,
+        first_arena: Arena,
+        second_arena: Arena,
     };
 
     fn init(
@@ -148,7 +149,7 @@ const MemoryPool = struct {
         const page_size = heap.pageSize();
         const arena_size = mem.alignForward(usize, min_arena_size, page_size);
         const arena_size_with_guard = arena_size + page_size;
-        const all_arenas_size = arena_size_with_guard * stack_count;
+        const all_arenas_size = arena_size_with_guard * stack_count * 2;
 
         // NOTE(gabriel):
         //
@@ -210,12 +211,19 @@ const MemoryPool = struct {
         const stacks_memory = allocated[cache_size..][0..all_stacks_size];
         const arenas_memory = allocated[cache_size + all_stacks_size ..][0..all_arenas_size];
         for (nodes, 0..) |*node, i| {
-            const arena_memory = arenas_memory[i * arena_size_with_guard ..][0..arena_size];
-            node.arena = .{
+            const arena_memory = arenas_memory[2 * i * arena_size_with_guard ..][0..arena_size];
+            const second_arena_memory = arenas_memory[((2 * i) + 1) * arena_size_with_guard ..][0..arena_size];
+            node.first_arena = .{
                 .flags = .{},
                 .page_size = page_size,
                 .reserve_len = arena_size,
                 .ptr = arena_memory.ptr,
+            };
+            node.second_arena = .{
+                .flags = .{},
+                .page_size = page_size,
+                .reserve_len = arena_size,
+                .ptr = second_arena_memory.ptr,
             };
 
             const stack_memory: []align(heap.page_size_min) u8 = @alignCast(
@@ -279,25 +287,41 @@ const MemoryPool = struct {
         return null;
     }
 
-    fn push(self: *MemoryPool, stack: Stack, arena: Arena) ?*CmdBuf {
-        var arena_ = arena;
-        arena_.pos.store(0, .monotonic);
-        self.cache.appendBounded(.{ .arena = arena, .stack = stack }) catch {
+    fn push(self: *MemoryPool, stack: Stack, first_arena: Arena, second_arena: Arena) ?*CmdBuf {
+        var first_arena_ = first_arena;
+        var second_arena_ = second_arena;
+        first_arena_.pos.store(0, .monotonic);
+        second_arena_.pos.store(0, .monotonic);
+        self.cache.appendBounded(.{ .first_arena = first_arena_, .second_arena = second_arena_, .stack = stack }) catch {
             switch (comptime builtin.os.tag) {
                 .windows => blk: {
-                    if (arena_.commit_len.load(.monotonic) != 0) {
-                        arena_.pos.store(0, .monotonic);
-                        const arena_memory = arena_.ptr.?[0..arena.commit_len.load(.monotonic)];
+                    if (first_arena_.commit_len.load(.monotonic) != 0) {
+                        first_arena_.pos.store(0, .monotonic);
+                        const arena_memory = first_arena_.ptr.?[0..first_arena_.commit_len.load(.monotonic)];
                         _ = win32.system.memory.VirtualFree(
                             arena_memory.ptr,
                             arena_memory.len,
                             .DECOMMIT,
                         );
-                        arena_.commit_len.store(0, .monotonic);
+                        first_arena_.commit_len.store(0, .monotonic);
+                    }
+                    if (second_arena_.commit_len.load(.monotonic) != 0) {
+                        second_arena_.pos.store(0, .monotonic);
+                        const arena_memory = second_arena_.ptr.?[0..second_arena_.commit_len.load(.monotonic)];
+                        _ = win32.system.memory.VirtualFree(
+                            arena_memory.ptr,
+                            arena_memory.len,
+                            .DECOMMIT,
+                        );
+                        second_arena_.commit_len.store(0, .monotonic);
                     }
 
                     if (stack.commited_size == self.page_size) {
-                        self.free_list.appendAssumeCapacity(.{ .arena = arena_, .stack = stack });
+                        self.free_list.appendAssumeCapacity(.{
+                            .first_arena = first_arena_,
+                            .second_arena = second_arena_,
+                            .stack = stack,
+                        });
                         break :blk;
                     }
 
@@ -322,7 +346,8 @@ const MemoryPool = struct {
                     );
 
                     self.free_list.appendAssumeCapacity(.{
-                        .arena = arena_,
+                        .first_arena = first_arena_,
+                        .second_arena = second_arena_,
                         .stack = .{
                             .memory = stack.memory,
                             .commited_size = self.page_size,
@@ -330,11 +355,17 @@ const MemoryPool = struct {
                     });
                 },
                 else => {
-                    if (arena_.commit_len.load(.monotonic) != 0) {
-                        arena_.pos.store(0, .monotonic);
-                        const arena_memory = arena_.ptr.?[0..arena.commit_len.load(.monotonic)];
+                    if (first_arena_.commit_len.load(.monotonic) != 0) {
+                        first_arena_.pos.store(0, .monotonic);
+                        const arena_memory = first_arena_.ptr.?[0..first_arena_.commit_len.load(.monotonic)];
                         posix.mprotect(@alignCast(arena_memory), posix.PROT.NONE) catch unreachable;
-                        arena_.commit_len.store(0, .monotonic);
+                        first_arena_.commit_len.store(0, .monotonic);
+                    }
+                    if (second_arena_.commit_len.load(.monotonic) != 0) {
+                        second_arena_.pos.store(0, .monotonic);
+                        const arena_memory = second_arena_.ptr.?[0..second_arena_.commit_len.load(.monotonic)];
+                        posix.mprotect(@alignCast(arena_memory), posix.PROT.NONE) catch unreachable;
+                        second_arena_.commit_len.store(0, .monotonic);
                     }
 
                     posix.madvise(
@@ -342,7 +373,11 @@ const MemoryPool = struct {
                         stack.memory.len,
                         posix.MADV.DONTNEED,
                     ) catch unreachable;
-                    self.free_list.appendAssumeCapacity(.{ .arena = arena_, .stack = stack });
+                    self.free_list.appendAssumeCapacity(.{
+                        .first_arena = first_arena_,
+                        .second_arena = second_arena_,
+                        .stack = stack,
+                    });
                 },
             }
         };
@@ -889,7 +924,8 @@ pub const Task = struct {
     batch_idx: usize,
     task: *fimo_tasks_meta.Task,
     stack: Stack,
-    arena: Arena,
+    first_arena: Arena,
+    second_arena: Arena,
     enqueued: bool = false,
     bound_to_worker: bool = false,
     worker: ?*Worker,
@@ -1277,10 +1313,12 @@ pub const Worker = struct {
             self.call_stack = task.call_stack.replaceCurrent();
             CallStack.resumeCurrent();
 
+            ctx.setCustomScratchArenas(&task.first_arena, &task.second_arena);
             const old_result: AnyResult = ctx.replaceResult(task.local_result);
             const tr = task.context.yieldTo(0);
             task.local_result = ctx.replaceResult(old_result);
             task.context = tr.context;
+            ctx.unsetCustomScratchArenas();
 
             debug.assert(self.task == task);
             self.task = null;
@@ -1576,7 +1614,7 @@ fn run(self: *Executor, futex: *Futex) void {
                     if (msg.tag == .task_abort)
                         cmd_buf.cancel_requested.store(true, .monotonic);
 
-                    if (self.memory_pool.push(task.stack, task.arena)) |waiter| {
+                    if (self.memory_pool.push(task.stack, task.first_arena, task.second_arena)) |waiter| {
                         debug.assert(!waiter.enqueued);
                         waiter.enqueued = true;
                         self.process_queue.append(&waiter.node);
@@ -1646,7 +1684,8 @@ fn run(self: *Executor, futex: *Futex) void {
                         const task = cmd.payload.enqueue_task;
                         while (cmd_buf.sub_cmd_idx < task.batch_len) : (cmd_buf.sub_cmd_idx += 1) {
                             const memory_node = self.memory_pool.pop(cmd_buf) orelse continue :next_buf;
-                            const arena = memory_node.arena;
+                            const first_arena = memory_node.first_arena;
+                            const second_arena = memory_node.second_arena;
                             const stack = memory_node.stack;
                             const alloc = self.task_pool.create(futex);
                             alloc.* = .{
@@ -1655,7 +1694,8 @@ fn run(self: *Executor, futex: *Futex) void {
                                 .batch_idx = cmd_buf.sub_cmd_idx,
                                 .task = task,
                                 .stack = stack,
-                                .arena = arena,
+                                .first_arena = first_arena,
+                                .second_arena = second_arena,
                                 .worker = cmd_buf.active_worker,
                                 .call_stack = .init(),
                                 .context = .init(.forStack(stack), Worker.start),
