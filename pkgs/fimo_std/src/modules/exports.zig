@@ -416,7 +416,7 @@ pub fn Module(T: type) type {
                 .enum_literal => {
                     const field_name = @tagName(value);
                     if (!@hasField(T, field_name)) @compileError("fimo: invalid export offset, specified unknown field: " ++ field_name);
-                    if (@FieldType(T, field_name) != symbol.T) @compileError("fimo: invalid export value at field `" ++ field_name ++ "`, expected " ++ @typeName(symbol.T) ++ "`, found " ++ @FieldType(T, field_name));
+                    if (@FieldType(T, field_name) != symbol.T) @compileError("fimo: invalid export value at field `" ++ field_name ++ "`, expected `" ++ @typeName(symbol.T) ++ "`, found " ++ @typeName(@FieldType(T, field_name)));
                     const field_offset = @offsetOf(T, field_name);
                     export_infos = export_infos ++ [_]SymbolExport{.{
                         .symbol = .fromSymbol(symbol),
