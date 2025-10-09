@@ -449,19 +449,19 @@ fstd_util FSTD_U8 fstd_align_backwards_u8(FSTD_U8 value, FSTD_U8 alignment) {
     return value & ~(alignment - 1);
 }
 fstd_util FSTD_U16 fstd_align_backwards_u16(FSTD_U16 value, FSTD_U16 alignment) {
-    fstd_dbg_assert(fstd_is_power_of_two_u8(alignment));
+    fstd_dbg_assert(fstd_is_power_of_two_u16(alignment));
     return value & ~(alignment - 1);
 }
 fstd_util FSTD_U32 fstd_align_backwards_u32(FSTD_U32 value, FSTD_U32 alignment) {
-    fstd_dbg_assert(fstd_is_power_of_two_u8(alignment));
+    fstd_dbg_assert(fstd_is_power_of_two_u32(alignment));
     return value & ~(alignment - 1);
 }
 fstd_util FSTD_U64 fstd_align_backwards_u64(FSTD_U64 value, FSTD_U64 alignment) {
-    fstd_dbg_assert(fstd_is_power_of_two_u8(alignment));
+    fstd_dbg_assert(fstd_is_power_of_two_u64(alignment));
     return value & ~(alignment - 1);
 }
 fstd_util FSTD_USize fstd_align_backwards_usize(FSTD_USize value, FSTD_USize alignment) {
-    fstd_dbg_assert(fstd_is_power_of_two_u8(alignment));
+    fstd_dbg_assert(fstd_is_power_of_two_usize(alignment));
     return value & ~(alignment - 1);
 }
 
@@ -470,19 +470,19 @@ fstd_util FSTD_U8 fstd_align_forwards_u8(FSTD_U8 value, FSTD_U8 alignment) {
     return fstd_align_backwards_u8(value + (alignment - 1), alignment);
 }
 fstd_util FSTD_U16 fstd_align_forwards_u16(FSTD_U16 value, FSTD_U16 alignment) {
-    fstd_dbg_assert(fstd_is_power_of_two_u8(alignment));
+    fstd_dbg_assert(fstd_is_power_of_two_u16(alignment));
     return fstd_align_backwards_u16(value + (alignment - 1), alignment);
 }
 fstd_util FSTD_U32 fstd_align_forwards_u32(FSTD_U32 value, FSTD_U32 alignment) {
-    fstd_dbg_assert(fstd_is_power_of_two_u8(alignment));
+    fstd_dbg_assert(fstd_is_power_of_two_u32(alignment));
     return fstd_align_backwards_u32(value + (alignment - 1), alignment);
 }
 fstd_util FSTD_U64 fstd_align_forwards_u64(FSTD_U64 value, FSTD_U64 alignment) {
-    fstd_dbg_assert(fstd_is_power_of_two_u8(alignment));
+    fstd_dbg_assert(fstd_is_power_of_two_u64(alignment));
     return fstd_align_backwards_u64(value + (alignment - 1), alignment);
 }
 fstd_util FSTD_USize fstd_align_forwards_usize(FSTD_USize value, FSTD_USize alignment) {
-    fstd_dbg_assert(fstd_is_power_of_two_u8(alignment));
+    fstd_dbg_assert(fstd_is_power_of_two_usize(alignment));
     return fstd_align_backwards_usize(value + (alignment - 1), alignment);
 }
 
@@ -3897,48 +3897,46 @@ namespace fstd {
     using u64 = FSTD_U64;
     using usize = FSTD_USize;
 
-    fstd_util auto nextPowOfTwo(auto v) noexcept -> decltype(v) {
+    constexpr static auto nextPowOfTwo(auto v) noexcept -> decltype(v)
+        requires(std::is_integral_v<decltype(v)> and std::is_unsigned_v<decltype(v)> and
+                 sizeof(decltype(v)) <= sizeof(u64))
+    {
         using T = decltype(v);
-        if constexpr (std::is_same_v<T, u8>) {
-            return fstd_next_power_of_two_u8(v);
+        fstd_dbg_assert(v > 0);
+        v--;
+        v |= v >> 1;
+        v |= v >> 2;
+        v |= v >> 4;
+        if constexpr (sizeof(T) >= sizeof(u16)) {
+            v |= v >> 8;
         }
-        else if constexpr (std::is_same_v<T, u16>) {
-            return fstd_next_power_of_two_u16(v);
+        if constexpr (sizeof(T) >= sizeof(u32)) {
+            v |= v >> 16;
         }
-        else if constexpr (std::is_same_v<T, u32>) {
-            return fstd_next_power_of_two_u32(v);
+        if constexpr (sizeof(T) >= sizeof(u64)) {
+            v |= v >> 32;
         }
-        else if constexpr (std::is_same_v<T, u64>) {
-            return fstd_next_power_of_two_u64(v);
-        }
-        else if constexpr (std::is_same_v<T, usize>) {
-            return fstd_next_power_of_two_usize(v);
-        }
-        else {
-            static_assert(false, "invalid unsigned integer");
-        }
+        return v + 1;
     }
 
-    fstd_util auto isPowOfTwo(auto v) noexcept -> bool {
-        using T = decltype(v);
-        if constexpr (std::is_same_v<T, u8>) {
-            return fstd_is_power_of_two_u8(v);
-        }
-        else if constexpr (std::is_same_v<T, u16>) {
-            return fstd_is_power_of_two_u16(v);
-        }
-        else if constexpr (std::is_same_v<T, u32>) {
-            return fstd_is_power_of_two_u32(v);
-        }
-        else if constexpr (std::is_same_v<T, u64>) {
-            return fstd_is_power_of_two_u64(v);
-        }
-        else if constexpr (std::is_same_v<T, usize>) {
-            return fstd_is_power_of_two_usize(v);
-        }
-        else {
-            static_assert(false, "invalid unsigned integer");
-        }
+    constexpr static bool isPowOfTwo(auto v) noexcept
+        requires(std::is_integral_v<decltype(v)> and std::is_unsigned_v<decltype(v)>)
+    {
+        fstd_dbg_assert(v > 0);
+        return ((v & (v - 1)) == 0);
+    }
+
+    constexpr static auto alignBackwards(auto v, decltype(v) alignment) noexcept -> decltype(v)
+        requires(std::is_integral_v<decltype(v)> and std::is_unsigned_v<decltype(v)>)
+    {
+        fstd_dbg_assert(isPowOfTwo(alignment));
+        return v & ~(alignment - 1);
+    }
+
+    constexpr static auto alignForwards(auto v, decltype(v) alignment) noexcept -> decltype(v)
+        requires(std::is_integral_v<decltype(v)> and std::is_unsigned_v<decltype(v)>)
+    {
+        return alignBackwards(v + (alignment - 1), alignment);
     }
 
     template<typename T>
@@ -4360,13 +4358,36 @@ namespace fstd {
             }
         };
 
-        template<usize Index, typename... Ts>
+        template<typename... Ts>
+        struct TupleAlignment;
+
+        template<typename T, typename... Rest>
+        struct TupleAlignment<T, Rest...>
+            : ConstexprValue<(alignof(T) < TupleAlignment<Rest...>::Value) ? TupleAlignment<Rest...>::Value
+                                                                           : alignof(T)> {};
+
+        template<>
+        struct TupleAlignment<> : ConstexprValue<static_cast<usize>(0)> {};
+
+        template<usize Offset, typename... Ts>
+        struct TuplePadding;
+
+        template<usize Offset, typename Head, typename... Rest>
+        struct TuplePadding<Offset, Head, Rest...> : ConstexprValue<alignForwards(Offset, alignof(Head)) - Offset> {};
+        static_assert(TuplePadding<0, i32>::Value == 0);
+        static_assert(TuplePadding<1, i32>::Value == 3);
+        static_assert(TuplePadding<2, i32>::Value == 2);
+        static_assert(TuplePadding<3, i32>::Value == 1);
+
+        template<usize Index, usize Offset, typename... Ts>
         struct TupleMember;
 
-        template<usize Index, typename T, typename... Rest>
-        struct TupleMember<Index, T, Rest...> : ConstexprValue<Index> {
+#pragma pack(push, 1)
+        template<usize Index, usize Offset, typename T, typename... Rest>
+        struct TupleMember<Index, Offset, T, Rest...> : ConstexprValue<Index> {
             T member;
-            TupleMember<Index + 1, Rest...> next;
+            char padding[TuplePadding<Offset + sizeof(member), Rest...>::Value];
+            TupleMember<Index + 1, Offset + sizeof(member) + sizeof(padding), Rest...> next;
 
             constexpr TupleMember() noexcept(std::conjunction_v<std::is_nothrow_default_constructible<T>,
                                                                 std::is_nothrow_default_constructible<Rest>...>)
@@ -4386,30 +4407,30 @@ namespace fstd {
                 requires(std::conjunction_v<std::is_constructible<T, U>, std::is_constructible<Rest, URest>...>)
                 : member(std::forward<U>(member)), next(std::forward<URest>(args)...) {}
 
-            template<usize I, typename U, typename... URest, URest...>
-            constexpr TupleMember(TupleMember<I, U, URest...> &other) noexcept(
+            template<usize I, usize O, typename U, typename... URest, URest...>
+            constexpr TupleMember(TupleMember<I, O, U, URest...> &other) noexcept(
                     std::conjunction_v<std::is_nothrow_constructible<T, U &>,
                                        std::is_nothrow_constructible<Rest, URest &>...>)
                 requires(std::conjunction_v<std::is_constructible<T, U &>, std::is_constructible<Rest, URest &>...>)
                 : member(other.member), next(other.next) {}
 
-            template<usize I, typename U, typename... URest, URest...>
-            constexpr TupleMember(const TupleMember<I, U, URest...> &other) noexcept(
+            template<usize I, usize O, typename U, typename... URest, URest...>
+            constexpr TupleMember(const TupleMember<I, O, U, URest...> &other) noexcept(
                     std::conjunction_v<std::is_nothrow_constructible<T, const U &>,
                                        std::is_nothrow_constructible<Rest, const URest &>...>)
                 requires(std::conjunction_v<std::is_constructible<T, const U &>,
                                             std::is_constructible<Rest, const URest &>...>)
                 : member(other.member), next(other.next) {}
 
-            template<usize I, typename U, typename... URest, URest...>
-            constexpr TupleMember(TupleMember<I, U, URest...> &&other) noexcept(
+            template<usize I, usize O, typename U, typename... URest, URest...>
+            constexpr TupleMember(TupleMember<I, O, U, URest...> &&other) noexcept(
                     std::conjunction_v<std::is_nothrow_constructible<T, U &&>,
                                        std::is_nothrow_constructible<Rest, URest &&>...>)
                 requires(std::conjunction_v<std::is_constructible<T, U &&>, std::is_constructible<Rest, URest &&>...>)
                 : member(std::move(other.member)), next(std::move(other.next)) {}
 
-            template<usize I, typename U, typename... URest>
-            constexpr TupleMember(const TupleMember<I, U, URest...> &&other) noexcept(
+            template<usize I, usize O, typename U, typename... URest>
+            constexpr TupleMember(const TupleMember<I, O, U, URest...> &&other) noexcept(
                     std::conjunction_v<std::is_nothrow_constructible<T, const U &&>,
                                        std::is_nothrow_constructible<Rest, const URest &&>...>)
                 requires(std::conjunction_v<std::is_constructible<T, const U &&>,
@@ -4463,8 +4484,8 @@ namespace fstd {
                 return *this;
             }
 
-            template<usize I, typename U, typename... URest>
-            constexpr TupleMember &operator=(const TupleMember<I, U, URest...> &other) noexcept(
+            template<usize I, usize O, typename U, typename... URest>
+            constexpr TupleMember &operator=(const TupleMember<I, O, U, URest...> &other) noexcept(
                     std::conjunction_v<std::is_nothrow_assignable<T &, const U &>,
                                        std::is_nothrow_assignable<Rest &, const URest &>...>)
                 requires(std::conjunction_v<std::is_assignable<T &, const U &>,
@@ -4475,8 +4496,8 @@ namespace fstd {
                 return *this;
             }
 
-            template<usize I, typename U, typename... URest>
-            constexpr const TupleMember &operator=(const TupleMember<I, U, URest...> &other) const
+            template<usize I, usize O, typename U, typename... URest>
+            constexpr const TupleMember &operator=(const TupleMember<I, O, U, URest...> &other) const
                     noexcept(std::conjunction_v<std::is_nothrow_assignable<const T &, const U &>,
                                                 std::is_nothrow_assignable<const Rest &, const URest &>...>)
                 requires(std::conjunction_v<std::is_assignable<const T &, const U &>,
@@ -4487,8 +4508,8 @@ namespace fstd {
                 return *this;
             }
 
-            template<usize I, typename U, typename... URest>
-            constexpr TupleMember &operator=(TupleMember<I, U, URest...> &&other) noexcept(
+            template<usize I, usize O, typename U, typename... URest>
+            constexpr TupleMember &operator=(TupleMember<I, O, U, URest...> &&other) noexcept(
                     std::conjunction_v<std::is_nothrow_assignable<T &, U>,
                                        std::is_nothrow_assignable<Rest &, URest>...>)
                 requires(std::conjunction_v<std::is_assignable<T &, U>, std::is_assignable<Rest &, URest>...>)
@@ -4498,8 +4519,8 @@ namespace fstd {
                 return *this;
             }
 
-            template<usize I, typename U, typename... URest>
-            constexpr const TupleMember &operator=(TupleMember<I, U, URest...> &&other) const
+            template<usize I, usize O, typename U, typename... URest>
+            constexpr const TupleMember &operator=(TupleMember<I, O, U, URest...> &&other) const
                     noexcept(std::conjunction_v<std::is_nothrow_assignable<const T &, U>,
                                                 std::is_nothrow_assignable<const Rest &, URest>...>)
                 requires(std::conjunction_v<std::is_assignable<const T &, U>,
@@ -4510,26 +4531,28 @@ namespace fstd {
                 return *this;
             }
 
-            template<usize I, typename U, typename... URest>
-            friend constexpr bool operator==(const TupleMember &lhs, const TupleMember<I, U, URest...> &rhs) noexcept {
+            template<usize I, usize O, typename U, typename... URest>
+            friend constexpr bool operator==(const TupleMember &lhs,
+                                             const TupleMember<I, O, U, URest...> &rhs) noexcept {
                 if (!(lhs.member == rhs.member))
                     return false;
                 return lhs.next == rhs.next;
             }
 
-            template<usize I, typename U, typename... URest>
+            template<usize I, usize O, typename U, typename... URest>
             friend constexpr std::common_comparison_category_t<
                     decltype(three_way(std::declval<const T &>(), std::declval<const U &>())),
                     decltype(three_way(std::declval<const Rest &>(), std::declval<const URest &>()))...>
-            operator<=>(const TupleMember &lhs, const TupleMember<I, U, URest...> &rhs) noexcept {
+            operator<=>(const TupleMember &lhs, const TupleMember<I, O, U, URest...> &rhs) noexcept {
                 if (auto c = three_way(lhs.member, rhs.member); c != 0)
                     return c;
                 return three_way(lhs.next, rhs.next);
             }
         };
+#pragma pack(pop)
 
-        template<usize Index, typename T>
-        struct TupleMember<Index, T> : ConstexprValue<Index> {
+        template<usize Index, usize Offset, typename T>
+        struct TupleMember<Index, Offset, T> : ConstexprValue<Index> {
             T member;
 
             constexpr TupleMember() noexcept(std::conjunction_v<std::is_nothrow_default_constructible<T>>)
@@ -4545,26 +4568,26 @@ namespace fstd {
                 requires(std::conjunction_v<std::is_constructible<T, U>>)
                 : member(std::forward<U>(member)) {}
 
-            template<usize I, typename U>
-            constexpr TupleMember(TupleMember<I, U> &other) noexcept(
+            template<usize I, usize O, typename U>
+            constexpr TupleMember(TupleMember<I, O, U> &other) noexcept(
                     std::conjunction_v<std::is_nothrow_constructible<T, U &>>)
                 requires(std::conjunction_v<std::is_constructible<T, U &>>)
                 : member(other.member) {}
 
-            template<usize I, typename U>
-            constexpr TupleMember(const TupleMember<I, U> &other) noexcept(
+            template<usize I, usize O, typename U>
+            constexpr TupleMember(const TupleMember<I, O, U> &other) noexcept(
                     std::conjunction_v<std::is_nothrow_constructible<T, const U &>>)
                 requires(std::conjunction_v<std::is_constructible<T, const U &>>)
                 : member(other.member) {}
 
-            template<usize I, typename U>
-            constexpr TupleMember(TupleMember<I, U> &&other) noexcept(
+            template<usize I, usize O, typename U>
+            constexpr TupleMember(TupleMember<I, O, U> &&other) noexcept(
                     std::conjunction_v<std::is_nothrow_constructible<T, U &&>>)
                 requires(std::conjunction_v<std::is_constructible<T, U &&>>)
                 : member(std::move(other.member)) {}
 
-            template<usize I, typename U>
-            constexpr TupleMember(const TupleMember<I, U> &&other) noexcept(
+            template<usize I, usize O, typename U>
+            constexpr TupleMember(const TupleMember<I, O, U> &&other) noexcept(
                     std::conjunction_v<std::is_nothrow_constructible<T, const U &&>>)
                 requires(std::conjunction_v<std::is_constructible<T, const U &&>>)
                 : member(std::move(other.member)) {}
@@ -4607,8 +4630,8 @@ namespace fstd {
                 return *this;
             }
 
-            template<usize I, typename U>
-            constexpr TupleMember &operator=(const TupleMember<I, U> &other) noexcept(
+            template<usize I, usize O, typename U>
+            constexpr TupleMember &operator=(const TupleMember<I, O, U> &other) noexcept(
                     std::conjunction_v<std::is_nothrow_assignable<T &, const U &>>)
                 requires(std::conjunction_v<std::is_assignable<T &, const U &>>)
             {
@@ -4616,8 +4639,8 @@ namespace fstd {
                 return *this;
             }
 
-            template<usize I, typename U>
-            constexpr const TupleMember &operator=(const TupleMember<I, U> &other) const
+            template<usize I, usize O, typename U>
+            constexpr const TupleMember &operator=(const TupleMember<I, O, U> &other) const
                     noexcept(std::conjunction_v<std::is_nothrow_assignable<const T &, const U &>>)
                 requires(std::conjunction_v<std::is_assignable<const T &, const U &>>)
             {
@@ -4625,17 +4648,17 @@ namespace fstd {
                 return *this;
             }
 
-            template<usize I, typename U>
+            template<usize I, usize O, typename U>
             constexpr TupleMember &
-            operator=(TupleMember<I, U> &&other) noexcept(std::conjunction_v<std::is_nothrow_assignable<T &, U>>)
+            operator=(TupleMember<I, O, U> &&other) noexcept(std::conjunction_v<std::is_nothrow_assignable<T &, U>>)
                 requires(std::conjunction_v<std::is_assignable<T &, U>>)
             {
                 this->member = std::forward<T>(other.member);
                 return *this;
             }
 
-            template<usize I, typename U>
-            constexpr const TupleMember &operator=(TupleMember<I, U> &&other) const
+            template<usize I, usize O, typename U>
+            constexpr const TupleMember &operator=(TupleMember<I, O, U> &&other) const
                     noexcept(std::conjunction_v<std::is_nothrow_assignable<const T &, U>>)
                 requires(std::conjunction_v<std::is_assignable<const T &, U>>)
             {
@@ -4643,19 +4666,19 @@ namespace fstd {
                 return *this;
             }
 
-            template<usize I, typename U>
-            friend constexpr bool operator==(const TupleMember &lhs, const TupleMember<I, U> &rhs) noexcept {
+            template<usize I, usize O, typename U>
+            friend constexpr bool operator==(const TupleMember &lhs, const TupleMember<I, O, U> &rhs) noexcept {
                 return lhs.member == rhs.member;
             }
 
-            template<usize I, typename U>
-            friend constexpr auto operator<=>(const TupleMember &lhs, const TupleMember<I, U> &rhs) noexcept {
+            template<usize I, usize O, typename U>
+            friend constexpr auto operator<=>(const TupleMember &lhs, const TupleMember<I, O, U> &rhs) noexcept {
                 return three_way(lhs.member, rhs.member);
             }
         };
 
-        template<usize Index>
-        struct TupleMember<Index> : ConstexprValue<Index> {};
+        template<usize Index, usize Offset>
+        struct TupleMember<Index, Offset> : ConstexprValue<Index> {};
 
         template<usize Index, typename Ret, typename Head>
         constexpr Ret &get(Head &head) {
@@ -4698,7 +4721,7 @@ namespace fstd {
     // NOTE(gabriel): Is guaranteed to have the same layout like a struct with the same types.
     template<typename... Ts>
     struct Tuple {
-        tuple_detail::TupleMember<0, Ts...> members;
+        alignas(tuple_detail::TupleAlignment<Ts...>::Value) tuple_detail::TupleMember<0, 0, Ts...> members;
 
         constexpr Tuple() noexcept(std::conjunction_v<std::is_nothrow_default_constructible<Ts>...>)
             requires(std::conjunction_v<std::is_default_constructible<Ts>...>)
@@ -4897,6 +4920,16 @@ namespace fstd {
     }
 
     namespace tuple_detail {
+        struct LayoutTest {
+            u8 a;
+            u16 b;
+            u16 c;
+            u32 d;
+            u64 e;
+        };
+        static_assert(sizeof(Tuple<u8, u16, u16, u32, u64>) == sizeof(LayoutTest));
+        static_assert(alignof(Tuple<u8, u16, u16, u32, u64>) == alignof(LayoutTest));
+
         template<usize N, std::array<usize, N> Indices, usize... I>
         consteval static auto arrayToIndexSequence(std::index_sequence<I...>) {
             return std::index_sequence<std::get<I>(Indices)...>{};
