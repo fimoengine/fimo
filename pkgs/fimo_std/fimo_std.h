@@ -5211,12 +5211,9 @@ namespace fstd {
         using Type = typename std::add_const<typename TupleElement<Index, T>::Type>::type;
     };
 
-    template<usize Index, typename Head, typename... Rest>
-    struct TupleElement<Index, Tuple<Head, Rest...>> : TupleElement<Index - 1, Tuple<Rest...>> {};
-
-    template<typename Head, typename... Rest>
-    struct TupleElement<0, Tuple<Head, Rest...>> {
-        using Type = Head;
+    template<usize Index, typename... Ts>
+    struct TupleElement<Index, Tuple<Ts...>> {
+        using Type = Ts...[Index];
     };
 
     template<usize Index, typename T>
@@ -5257,6 +5254,7 @@ namespace fstd {
 
         template<usize N, std::array<usize, N> Indices>
         consteval static auto arrayToIndexSequence() {
+            // TODO: Replace with constexpr structured binding once it works.
             return arrayToIndexSequence<N, Indices>(std::make_index_sequence<N>{});
         }
 
