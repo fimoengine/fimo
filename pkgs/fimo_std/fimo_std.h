@@ -101,9 +101,9 @@
 #endif
 
 #if (defined(_M_AMD64) && !defined(_M_ARM64EC)) || defined(__x86_64__)
-#define FSTD_ARCH_X86_64
+#define FSTD_ARCH_X86_64 1
 #elif defined(_M_ARM64) || defined(_M_ARM64EC) || defined(__aarch64__)
-#define FSTD_ARCH_AARCH64
+#define FSTD_ARCH_AARCH64 1
 #else
 #error "unknown architecture"
 #endif
@@ -3940,6 +3940,21 @@ namespace fstd {
     }
 
     template<typename T>
+    struct Slice;
+
+    template<typename T>
+    concept Hasher = requires(T &hasher, Slice<const char> data) {
+        requires std::unsigned_integral<typename T::HashType>;
+        { hasher.update(data) } noexcept -> std::same_as<void>;
+        { hasher.finish() } noexcept -> std::same_as<typename T::HashType>;
+    };
+
+    template<typename T, typename H>
+    concept Hashable = requires(H &hasher, const T &value) {
+        { hash(hasher, value) } noexcept -> std::same_as<void>;
+    };
+
+    template<typename T>
     struct Slice {
         T *ptr;
         usize len;
@@ -4012,6 +4027,16 @@ namespace fstd {
         {
             return {.ptr = this->ptr, .len = this->len};
         }
+
+        template<Hasher H>
+        constexpr friend void hash(H &hasher, const Slice &values) noexcept
+            requires Hashable<T, H>
+        {
+            hash(hasher, values.size());
+            for (const auto &value: values) {
+                hash(hasher, value);
+            }
+        }
     };
 
     struct StrConst : FSTD_StrConst {
@@ -4031,7 +4056,8 @@ namespace fstd {
         using ConstReverseIterator = std::reverse_iterator<const char *>;
 
         constexpr StrConst() noexcept = default;
-        constexpr StrConst(const char *it) noexcept : StrConst(it, std::char_traits<char>::length(it)) {};
+        constexpr StrConst(const char *it) noexcept :
+            FSTD_StrConst{.ptr = std::to_address(it), .len = std::char_traits<char>::length(it)} {};
         template<typename It>
         constexpr StrConst(It first, usize count) noexcept
             requires std::is_convertible_v<std::remove_reference_t<std::iter_reference_t<It>> (*)[], ElementType (*)[]>
@@ -4088,9 +4114,303 @@ namespace fstd {
         constexpr usize size() const noexcept { return len; }
         constexpr usize sizeBytes() const noexcept { return len * sizeof(*ptr); }
         constexpr bool empty() const noexcept { return len == 0; }
+
+        template<Hasher H>
+        constexpr friend void hash(H &hasher, const StrConst &values) noexcept {
+            hash(hasher, values.size());
+            hasher.update({values.ptr, values.size()});
+        }
     };
 
     using Uuid = FSTD_Uuid;
+
+    /// Implementation of the [rapidhash](https://github.com/Nicoshev/rapidhash) algorithm.
+    // Based on the Rust implementation (https://github.com/hoxxep/rapidhash), which is is licensed under both the MIT
+    // and Apache-2.0 licenses.
+    struct RapidHash {
+        u64 seed;
+        std::array<u64, 7> secrets;
+
+        using HashType = u64;
+        constexpr static usize ColdPathCutoff = 400;
+        constexpr static usize DefaultSeed = 0;
+        constexpr static std::array<u64, 7> DefaultSecrets = {
+                0x2d358dccaa6c78a5, 0x8bb84b93962eacc9, 0x4b33a62ed433d4a3, 0x4d5a2da51de1aa47,
+                0xa0761d6478bd642f, 0xe7037ed1a0b428db, 0x90ed1765281c388c,
+        };
+
+        constexpr RapidHash() noexcept : RapidHash(DefaultSeed) {}
+        constexpr RapidHash(u64 seed) noexcept :
+            seed(rapidhashMix(seed ^ DefaultSecrets[2], DefaultSecrets[1])), secrets(DefaultSecrets) {}
+        constexpr RapidHash(const RapidHash &) noexcept = default;
+        constexpr RapidHash(RapidHash &&) noexcept = default;
+        constexpr RapidHash &operator=(const RapidHash &) noexcept = default;
+        constexpr RapidHash &operator=(RapidHash &&) noexcept = default;
+
+#ifdef FSTD_COMPILER_GCC_COMPATIBLE
+        [[gnu::always_inline]]
+#elif FSTD_COMPILER_MSC_COMPATIBLE
+        [[msvc::forceinline]]
+#endif
+        constexpr void update(Slice<const char> data) noexcept {
+            if (data.size() <= 16) [[likely]] {
+                u64 a = 0;
+                u64 b = 0;
+                if (data.size() >= 8) [[likely]] {
+                    a = readInt<u64>(data, 0);
+                    b = readInt<u64>(data, data.size() - sizeof(u64));
+                }
+                else if (data.size() >= 4) [[likely]] {
+                    a = readInt<u32>(data, 0);
+                    b = readInt<u32>(data, data.size() - sizeof(u32));
+                }
+                else if (!data.empty()) {
+                    a = (static_cast<u64>(std::bit_cast<unsigned char>(data[0])) << 45) |
+                        static_cast<u64>(std::bit_cast<unsigned char>(data[data.size() - 1]));
+                    b = std::bit_cast<unsigned char>(data[data.size() >> 1]);
+                }
+
+                u64 seed = this->seed + static_cast<u64>(data.size());
+                this->seed = rapidhashFinish(a, b, seed, this->secrets);
+            }
+            else {
+                rapidhashCore17_288(this->seed, this->secrets, data);
+            }
+        }
+
+#ifdef FSTD_COMPILER_GCC_COMPATIBLE
+        [[gnu::always_inline]]
+#elif FSTD_COMPILER_MSC_COMPATIBLE
+        [[msvc::forceinline]]
+#endif
+        constexpr HashType finish() noexcept {
+            return rapidhashMix(this->seed, this->secrets[1]);
+        }
+
+    private:
+#ifdef FSTD_COMPILER_GCC_COMPATIBLE
+        [[gnu::always_inline]]
+#elif FSTD_COMPILER_MSC_COMPATIBLE
+        [[msvc::forceinline]]
+#endif
+        constexpr static std::pair<u64, u64> rapidhashMum(u64 a, u64 b) noexcept {
+#if FSTD_COMPILER_GCC_COMPATIBLE
+            __uint128_t c = static_cast<__uint128_t>(a) * static_cast<__uint128_t>(b);
+            return {static_cast<u64>(c), static_cast<u64>(c >> 64)};
+#elif FSTD_COMPILER_MSC_COMPATIBLE
+            u64 high;
+            u64 low = _umul128(a, b, &high);
+            return {low, high};
+#else
+#error "unsupported compiler"
+#endif
+        }
+
+#ifdef FSTD_COMPILER_GCC_COMPATIBLE
+        [[gnu::always_inline]]
+#elif FSTD_COMPILER_MSC_COMPATIBLE
+        [[msvc::forceinline]]
+#endif
+        constexpr static u64 rapidhashMix(u64 a, u64 b) noexcept {
+#if FSTD_COMPILER_GCC_COMPATIBLE
+            __uint128_t c = static_cast<__uint128_t>(a) * static_cast<__uint128_t>(b);
+            u64 low = static_cast<u64>(c);
+            u64 high = static_cast<u64>(c >> 64);
+#elif FSTD_COMPILER_MSC_COMPATIBLE
+            u64 high;
+            u64 low = _umul128(a, b, &high);
+#else
+#error "unsupported compiler"
+#endif
+            return low ^ high;
+        }
+
+        template<std::unsigned_integral T>
+#ifdef FSTD_COMPILER_GCC_COMPATIBLE
+        [[gnu::always_inline]]
+#elif FSTD_COMPILER_MSC_COMPATIBLE
+        [[msvc::forceinline]]
+#endif
+        constexpr static T readInt(Slice<const char> data, usize offset) noexcept {
+            if consteval {
+                T v = 0;
+                for (usize i = 0; i < sizeof(T); i++) {
+                    v |= static_cast<T>(std::bit_cast<unsigned char>(data[offset + i])) << (i * 8);
+                }
+                if (std::endian::native != std::endian::little) {
+                    v = std::byteswap(v);
+                }
+                return v;
+            }
+            else {
+                using U = std::array<char, sizeof(T)>;
+                return std::bit_cast<T>(*reinterpret_cast<const U *>(data.data() + offset));
+            }
+        }
+
+#ifdef FSTD_COMPILER_GCC_COMPATIBLE
+        __attribute__((noinline, cold))
+#elif FSTD_COMPILER_MSC_COMPATIBLE
+        [[msvc::noinline]]
+#endif
+        constexpr static u64 rapidhashCore17_288(u64 seed, const std::array<u64, 7> &secrets,
+                                                 Slice<const char> data) noexcept {
+            [[assume(data.len > 16)]];
+
+#if !FSTD_ARCH_AARCH64
+            if (data.size() <= 48) [[likely]] {
+                return rapidhashFinal48(seed, secrets, data, data);
+            }
+#endif
+
+            Slice<const char> slice = data;
+            if (data.size() > 48) [[unlikely]] {
+                if (data.size() > ColdPathCutoff) [[unlikely]] {
+                    return rapidhashCoreCold(seed, secrets, data);
+                }
+
+                u64 see1 = seed;
+                u64 see2 = seed;
+                while (slice.size() >= 48) {
+                    seed = rapidhashMix(readInt<u64>(slice, 0) ^ secrets[0], readInt<u64>(slice, 8) ^ seed);
+                    see1 = rapidhashMix(readInt<u64>(slice, 16) ^ secrets[1], readInt<u64>(slice, 24) ^ see1);
+                    see2 = rapidhashMix(readInt<u64>(slice, 32) ^ secrets[2], readInt<u64>(slice, 40) ^ see2);
+                    slice = Slice<const char>{slice.ptr + 48, slice.len - 48};
+                }
+
+                seed ^= see1 ^ see2;
+            }
+
+            return rapidhashFinal48(seed, secrets, slice, data);
+        }
+
+#ifdef FSTD_COMPILER_GCC_COMPATIBLE
+        [[gnu::noinline, gnu::cold]]
+#elif FSTD_COMPILER_MSC_COMPATIBLE
+        [[msvc::noinline]]
+#endif
+        constexpr static u64 rapidhashCoreCold(u64 seed, const std::array<u64, 7> &secrets,
+                                               Slice<const char> data) noexcept {
+            [[assume(data.len > ColdPathCutoff)]];
+            Slice<const char> slice = data;
+
+            u64 see1 = seed;
+            u64 see2 = seed;
+            u64 see3 = seed;
+            u64 see4 = seed;
+            u64 see5 = seed;
+            u64 see6 = seed;
+
+            while (slice.size() >= 224) {
+                seed = rapidhashMix(readInt<u64>(slice, 0) ^ secrets[0], readInt<u64>(slice, 8) ^ seed);
+                see1 = rapidhashMix(readInt<u64>(slice, 16) ^ secrets[1], readInt<u64>(slice, 24) ^ see1);
+                see2 = rapidhashMix(readInt<u64>(slice, 32) ^ secrets[2], readInt<u64>(slice, 40) ^ see2);
+                see3 = rapidhashMix(readInt<u64>(slice, 48) ^ secrets[3], readInt<u64>(slice, 56) ^ see3);
+                see4 = rapidhashMix(readInt<u64>(slice, 64) ^ secrets[4], readInt<u64>(slice, 72) ^ see4);
+                see5 = rapidhashMix(readInt<u64>(slice, 80) ^ secrets[5], readInt<u64>(slice, 88) ^ see5);
+                see6 = rapidhashMix(readInt<u64>(slice, 96) ^ secrets[6], readInt<u64>(slice, 104) ^ see6);
+
+                seed = rapidhashMix(readInt<u64>(slice, 112) ^ secrets[0], readInt<u64>(slice, 120) ^ seed);
+                see1 = rapidhashMix(readInt<u64>(slice, 128) ^ secrets[1], readInt<u64>(slice, 136) ^ see1);
+                see2 = rapidhashMix(readInt<u64>(slice, 144) ^ secrets[2], readInt<u64>(slice, 152) ^ see2);
+                see3 = rapidhashMix(readInt<u64>(slice, 160) ^ secrets[3], readInt<u64>(slice, 168) ^ see3);
+                see4 = rapidhashMix(readInt<u64>(slice, 176) ^ secrets[4], readInt<u64>(slice, 184) ^ see4);
+                see5 = rapidhashMix(readInt<u64>(slice, 192) ^ secrets[5], readInt<u64>(slice, 200) ^ see5);
+                see6 = rapidhashMix(readInt<u64>(slice, 208) ^ secrets[6], readInt<u64>(slice, 216) ^ see6);
+                slice = Slice<const char>{slice.ptr + 224, slice.len - 224};
+            }
+
+            if (slice.size() >= 112) [[likely]] {
+                seed = rapidhashMix(readInt<u64>(slice, 0) ^ secrets[0], readInt<u64>(slice, 8) ^ seed);
+                see1 = rapidhashMix(readInt<u64>(slice, 16) ^ secrets[1], readInt<u64>(slice, 24) ^ see1);
+                see2 = rapidhashMix(readInt<u64>(slice, 32) ^ secrets[2], readInt<u64>(slice, 40) ^ see2);
+                see3 = rapidhashMix(readInt<u64>(slice, 48) ^ secrets[3], readInt<u64>(slice, 56) ^ see3);
+                see4 = rapidhashMix(readInt<u64>(slice, 64) ^ secrets[4], readInt<u64>(slice, 72) ^ see4);
+                see5 = rapidhashMix(readInt<u64>(slice, 80) ^ secrets[5], readInt<u64>(slice, 88) ^ see5);
+                see6 = rapidhashMix(readInt<u64>(slice, 96) ^ secrets[6], readInt<u64>(slice, 104) ^ see6);
+                slice = Slice<const char>{slice.ptr + 112, slice.len - 112};
+            }
+
+            if (slice.size() >= 48) {
+                seed = rapidhashMix(readInt<u64>(slice, 0) ^ secrets[0], readInt<u64>(slice, 8) ^ seed);
+                see1 = rapidhashMix(readInt<u64>(slice, 16) ^ secrets[1], readInt<u64>(slice, 24) ^ see1);
+                see2 = rapidhashMix(readInt<u64>(slice, 32) ^ secrets[2], readInt<u64>(slice, 40) ^ see2);
+                slice = Slice<const char>{slice.ptr + 48, slice.len - 48};
+
+                if (slice.size() >= 48) {
+                    seed = rapidhashMix(readInt<u64>(slice, 0) ^ secrets[0], readInt<u64>(slice, 8) ^ seed);
+                    see1 = rapidhashMix(readInt<u64>(slice, 16) ^ secrets[1], readInt<u64>(slice, 24) ^ see1);
+                    see2 = rapidhashMix(readInt<u64>(slice, 32) ^ secrets[2], readInt<u64>(slice, 40) ^ see2);
+                    slice = Slice<const char>{slice.ptr + 48, slice.len - 48};
+                }
+            }
+
+            see3 ^= see4;
+            see5 ^= see6;
+            seed ^= see1;
+            see3 ^= see2;
+            seed ^= see5;
+            seed ^= see3;
+
+            return rapidhashFinal48(seed, secrets, slice, data);
+        }
+
+#ifdef FSTD_COMPILER_GCC_COMPATIBLE
+        [[gnu::always_inline]]
+#elif FSTD_COMPILER_MSC_COMPATIBLE
+        [[msvc::forceinline]]
+#endif
+        constexpr static u64 rapidhashFinal48(u64 seed, const std::array<u64, 7> &secrets, Slice<const char> slice,
+                                              Slice<const char> data) noexcept {
+            [[assume(data.len > 16)]];
+            if (slice.size() > 16) [[likely]] {
+                seed = rapidhashMix(readInt<u64>(slice, 0) ^ secrets[0], readInt<u64>(slice, 8) ^ seed);
+                if (slice.size() > 32) [[likely]] {
+                    seed = rapidhashMix(readInt<u64>(slice, 16) ^ secrets[0], readInt<u64>(slice, 24) ^ seed);
+                }
+            }
+
+            u64 a = readInt<u64>(data, data.size() - 16);
+            u64 b = readInt<u64>(data, data.size() - 8);
+            seed += static_cast<u64>(data.size());
+            return rapidhashFinish(a, b, seed, secrets);
+        }
+
+#ifdef FSTD_COMPILER_GCC_COMPATIBLE
+        [[gnu::always_inline]]
+#elif FSTD_COMPILER_MSC_COMPATIBLE
+        [[msvc::forceinline]]
+#endif
+        constexpr static u64 rapidhashFinish(u64 a, u64 b, u64 seed, const std::array<u64, 7> &secrets) noexcept {
+            a ^= secrets[0];
+            b ^= seed;
+            std::tie(a, b) = rapidhashMum(a, b);
+            return rapidhashMix(a ^ 0xaaaaaaaaaaaaaaaa ^ seed, b ^ secrets[1]);
+        }
+    };
+
+    template<typename T>
+    constexpr static void hash(Hasher auto &hasher, const T &value) noexcept
+        requires(requires { value.hash(hasher); } or std::has_unique_object_representations_v<T>)
+    {
+        if constexpr (requires { value.hash(hasher); }) {
+            static_assert(std::is_same_v<decltype(value.hash(hasher)), void>,
+                          "invalid hash function return type, expected `void`");
+            value.hash(hasher);
+        }
+        else if constexpr (std::has_unique_object_representations_v<T>) {
+            if consteval {
+                auto bytes = std::bit_cast<std::array<char, sizeof(T)>>(value);
+                hasher.update(bytes);
+            }
+            else {
+                hasher.update(Slice<const char>{reinterpret_cast<const char *>(&value), sizeof(T)});
+            }
+        }
+        else {
+            static_assert(false, "no hash function defined for type");
+        }
+    }
 
     template<auto Value_>
     struct ConstexprValue {
