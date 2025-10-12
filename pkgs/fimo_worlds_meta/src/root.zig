@@ -39,7 +39,12 @@ pub const World = opaque {
     }
 
     /// Adds a new resource to the world.
-    pub fn addRes(self: *World, T: type, desc: Res(T).Desc) *Res(T) {
+    pub fn addRes(self: *World, T: type, options: Res(T).InitOptions) *Res(T) {
+        const desc: Res(T).Desc = .{
+            .label = .fromSlice(options.label),
+            .id = .of(T),
+            .value = options.value,
+        };
         const sym = symbols.world_add_res.getGlobal().get();
         return @ptrCast(sym(self, @ptrCast(&desc)));
     }
@@ -59,6 +64,24 @@ test "World: smoke test" {
     world.deinit();
 }
 
+/// Unique id of some type across multiple worlds.
+pub const ComponentId = enum(u64) {
+    _,
+
+    const Inner = *const struct {
+        _: u8,
+    };
+
+    pub inline fn of(comptime T: type) ComponentId {
+        return @enumFromInt(@intFromPtr(&struct {
+            comptime {
+                _ = T;
+            }
+            var id: @typeInfo(Inner).pointer.child = undefined;
+        }.id));
+    }
+};
+
 /// A handle to a resource in a world.
 ///
 /// The handle uniquely identifies the resource in the world.
@@ -66,17 +89,26 @@ pub fn Res(T: type) type {
     return opaque {
         pub const Value = T;
 
+        pub const InitOptions = struct {
+            /// Optional label of the resource.
+            label: ?[]const u8 = null,
+            /// Pointer to the resource.
+            value: *T,
+        };
+
         /// Descriptor for a resource.
         pub const Desc = extern struct {
             /// Optional label of the resource.
             label: SliceConst(u8) = .fromSlice(null),
+            /// Unique id of the type.
+            id: ComponentId,
             /// Pointer to the resource.
             value: *T,
         };
 
         /// Initializes a new resource in the world.
-        pub fn init(world: *World, desc: Desc) *@This() {
-            return world.addRes(T, desc);
+        pub fn init(world: *World, options: InitOptions) *@This() {
+            return world.addRes(T, options);
         }
 
         /// Invalidates the resource.
@@ -91,7 +123,7 @@ pub fn Res(T: type) type {
         ///
         /// __NOTE__: This may inhibit the scheduling of systems, as it is a valid implementation
         /// strategy to acquire all necessary resources before executing any system.
-        pub fn lockRead(self: *@This()) *T {
+        pub fn lockRead(self: *@This()) *const T {
             const sym = symbols.resource_lock_read.getGlobal().get();
             return @ptrCast(@alignCast(sym(@ptrCast(self))));
         }
@@ -127,7 +159,7 @@ test "Res: smoke test" {
     defer world.deinit();
 
     var value: i32 = 5;
-    const res = Res(i32).init(world, .{ .label = .fromSlice("my res"), .value = &value });
+    const res = Res(i32).init(world, .{ .label = "my res", .value = &value });
     defer res.deinit();
 
     const value_ptr = res.lockRead();
@@ -143,7 +175,7 @@ test "Res: lock read" {
     defer world.deinit();
 
     var value: usize = 0;
-    const res = Res(usize).init(world, .{ .label = .fromSlice("my res"), .value = &value });
+    const res = Res(usize).init(world, .{ .label = "my res", .value = &value });
     defer res.deinit();
 
     const num_writers: usize = 2;
@@ -239,7 +271,7 @@ test "Res: lock write" {
     defer world.deinit();
 
     var value: usize = 0;
-    const res = Res(usize).init(world, .{ .label = .fromSlice("my res"), .value = &value });
+    const res = Res(usize).init(world, .{ .label = "my res", .value = &value });
     defer res.deinit();
 
     const num_jobs = 4;
@@ -351,7 +383,7 @@ test "Scheduler: run (single-threaded)" {
     defer world.deinit();
 
     var value: usize = 0;
-    const res = Res(usize).init(world, .{ .label = .fromSlice("my res"), .value = &value });
+    const res = Res(usize).init(world, .{ .label = "my res", .value = &value });
     defer res.deinit();
 
     const scheduler = Scheduler.init(world, .{ .label = .fromSlice("my scheduler") });
@@ -363,7 +395,7 @@ test "Scheduler: run (single-threaded)" {
             .sys = .{
                 .label = .fromSlice("my sys"),
                 .args = .fromSlice(&.{
-                    .{ .tag = .write_resource, .handle = .{ .resource = @ptrCast(res) } },
+                    .{ .tag = .write_resource, .handle = .{ .id = .of(usize) } },
                 }),
                 .data = null,
                 .system = &struct {
@@ -403,7 +435,7 @@ test "Scheduler: run (multi-threaded)" {
     defer world.deinit();
 
     var value: usize = 0;
-    const res = Res(usize).init(world, .{ .label = .fromSlice("my res"), .value = &value });
+    const res = Res(usize).init(world, .{ .label = "my res", .value = &value });
     defer res.deinit();
 
     const scheduler = Scheduler.init(world, .{
@@ -418,7 +450,7 @@ test "Scheduler: run (multi-threaded)" {
             .sys = .{
                 .label = .fromSlice("my sys"),
                 .args = .fromSlice(&.{
-                    .{ .tag = .write_resource, .handle = .{ .resource = @ptrCast(res) } },
+                    .{ .tag = .write_resource, .handle = .{ .id = .of(usize) } },
                 }),
                 .data = null,
                 .system = &struct {
@@ -459,7 +491,7 @@ test "Scheduler: run (sub-task)" {
     defer world.deinit();
 
     var value: usize = 0;
-    const res = Res(usize).init(world, .{ .label = .fromSlice("my res"), .value = &value });
+    const res = Res(usize).init(world, .{ .label = "my res", .value = &value });
     defer res.deinit();
 
     const scheduler = Scheduler.init(world, .{
@@ -474,7 +506,7 @@ test "Scheduler: run (sub-task)" {
             .sys = .{
                 .label = .fromSlice("my sys"),
                 .args = .fromSlice(&.{
-                    .{ .tag = .write_resource, .handle = .{ .resource = @ptrCast(res) } },
+                    .{ .tag = .write_resource, .handle = .{ .id = .of(usize) } },
                 }),
                 .data = null,
                 .system = &struct {
@@ -550,8 +582,8 @@ pub const Sys = opaque {
 
         /// Accesses a resource.
         pub fn getResource(self: *const Args, T: type, idx: usize) *T {
-            const read = self.resources.intoSliceOrEmpty();
-            const ptr = read[idx];
+            const resources = self.resources.intoSliceOrEmpty();
+            const ptr = resources[idx];
             return @ptrCast(@alignCast(ptr));
         }
     };
@@ -574,7 +606,7 @@ pub const Sys = opaque {
             write_resource = 1,
         },
         handle: extern union {
-            resource: *Res(anyopaque),
+            id: ComponentId,
         },
     };
 

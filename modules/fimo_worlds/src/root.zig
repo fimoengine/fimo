@@ -23,6 +23,7 @@ const RwLock = sync.RwLock;
 const Fence = sync.Fence;
 const TimelineSemaphore = sync.TimelineSemaphore;
 const fimo_worlds = @import("fimo_worlds_meta");
+const ComponentId = fimo_worlds.ComponentId;
 const symbols = fimo_worlds.symbols;
 
 world_count: atomic.Value(usize) = .init(0),
@@ -83,7 +84,7 @@ pub const World = struct {
     arena: Arena,
     label: []u8,
     mutex: Mutex = .{},
-    res_count: usize = 0,
+    resources: AutoArrayHashMap(ComponentId, *Res) = .empty,
     res_free_list: ?*Res = null,
     sched_count: usize = 0,
     sched_free_list: ?*Scheduler = null,
@@ -105,7 +106,7 @@ pub const World = struct {
 
     pub fn deinit(self: *World) void {
         self.mutex.lock();
-        std.debug.assert(self.res_count == 0);
+        std.debug.assert(self.resources.count() == 0);
         std.debug.assert(self.sched_count == 0);
         while (self.sched_free_list) |sched| {
             self.sched_free_list = sched.next;
@@ -121,13 +122,17 @@ pub const World = struct {
     pub fn addRes(self: *World, desc: ResDesc) *Res {
         self.mutex.lock();
         defer self.mutex.unlock();
+        if (self.resources.contains(desc.id)) @panic("duplicate resource");
 
-        self.res_count += 1;
+        const allocator = self.arena.allocator();
         const res = if (self.res_free_list) |v| blk: {
             self.res_free_list = v.data.next;
             break :blk v;
-        } else self.arena.allocator().create(Res) catch @panic("oom");
+        } else allocator.create(Res) catch @panic("oom");
+        self.resources.put(allocator.adaptIntoStdAllocator(), desc.id, res) catch @panic("oom");
+
         res.* = .{
+            .id = desc.id,
             .world = self,
             .label = undefined,
             .label_len = undefined,
@@ -176,43 +181,59 @@ pub const World = struct {
 
 pub const ResDesc = struct {
     label: []const u8 = "",
+    id: ComponentId,
     value: *anyopaque,
 };
 
 pub const Res = struct {
+    id: ComponentId,
     world: *World,
     lock: RwLock = .{},
     label: [128]u8,
     label_len: usize,
+    usages: atomic.Value(usize) = .init(0),
     data: union {
         value: *anyopaque,
         next: ?*Res,
     },
 
     pub fn deinit(self: *Res) void {
+        if (self.usages.load(.acquire) != 0) @panic("resource in use");
         self.world.mutex.lock();
         defer self.world.mutex.unlock();
-        self.world.res_count -= 1;
+        _ = self.world.resources.swapRemove(self.id);
         self.data = .{ .next = self.world.res_free_list };
         self.world.res_free_list = self;
     }
 
+    fn ref(self: *Res) void {
+        _ = self.usages.fetchAdd(1, .monotonic);
+    }
+
+    fn unref(self: *Res) void {
+        _ = self.usages.fetchSub(1, .monotonic);
+    }
+
     pub fn lockRead(self: *Res) *anyopaque {
+        self.ref();
         self.lock.lockRead();
         return self.data.value;
     }
 
     pub fn unlockRead(self: *Res) void {
         self.lock.unlockRead();
+        self.unref();
     }
 
     pub fn lockWrite(self: *Res) *anyopaque {
+        self.ref();
         self.lock.lockWrite();
         return self.data.value;
     }
 
     pub fn unlockWrite(self: *Res) void {
         self.lock.unlockWrite();
+        self.unref();
     }
 };
 
@@ -289,11 +310,16 @@ fn Block(T: type, comptime n: usize) type {
     };
 }
 
-const ArgBlock = Block(Arg, 8);
+const ArgBlock = Block(ParsedArg, 8);
 const CondBlock = Block(*Cond, 8);
 const SysBlock = Block(*Sys, 8);
 
 const Arg = union(enum) {
+    read_resource: ComponentId,
+    write_resource: ComponentId,
+};
+
+const ParsedArg = union(enum) {
     read_resource: *Res,
     write_resource: *Res,
 };
@@ -354,8 +380,8 @@ pub const SysDesc = struct {
                     const args = try allocator.alloc(Arg, src.args.len);
                     for (args, src.args.intoSliceOrEmpty()) |*arg_dst, arg| {
                         arg_dst.* = switch (arg.tag) {
-                            .read_resource => .{ .read_resource = @ptrCast(@alignCast(arg.handle.resource)) },
-                            .write_resource => .{ .write_resource = @ptrCast(@alignCast(arg.handle.resource)) },
+                            .read_resource => .{ .read_resource = arg.handle.id },
+                            .write_resource => .{ .write_resource = arg.handle.id },
                         };
                     }
 
@@ -374,8 +400,8 @@ pub const SysDesc = struct {
                     const args = try allocator.alloc(Arg, next_sys.args.len);
                     for (args, next_sys.args.intoSliceOrEmpty()) |*arg_dst, arg| {
                         arg_dst.* = switch (arg.tag) {
-                            .read_resource => .{ .read_resource = @ptrCast(@alignCast(arg.handle.resource)) },
-                            .write_resource => .{ .write_resource = @ptrCast(@alignCast(arg.handle.resource)) },
+                            .read_resource => .{ .read_resource = arg.handle.id },
+                            .write_resource => .{ .write_resource = arg.handle.id },
                         };
                     }
 
@@ -506,6 +532,12 @@ pub const Sys = struct {
                 const cond = opt_cond orelse break;
                 while (cond.args) |block2| {
                     cond.args = block2.next;
+                    for (&block2.entries) |entry| {
+                        const arg = entry orelse break;
+                        switch (arg) {
+                            .read_resource, .write_resource => |v| v.unref(),
+                        }
+                    }
                     scheduler.deallocArgBlock(block2);
                 }
             }
@@ -513,6 +545,12 @@ pub const Sys = struct {
         }
         while (self.args) |block| {
             self.args = block.next;
+            for (&block.entries) |entry| {
+                const arg = entry orelse break;
+                switch (arg) {
+                    .read_resource, .write_resource => |v| v.unref(),
+                }
+            }
             scheduler.deallocArgBlock(block);
         }
         scheduler.deallocSys(self);
@@ -738,6 +776,9 @@ pub const Scheduler = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
 
+        self.world.mutex.lock();
+        defer self.world.mutex.unlock();
+
         const DescInfo = struct {
             desc: *const SysDesc,
             after: ?*const SysDesc,
@@ -771,6 +812,16 @@ pub const Scheduler = struct {
         var cond_end_idx: usize = 0;
         errdefer for (0..cond_stack.items.len - cond_end_idx) |_| {
             const cond = cond_stack.pop().?;
+            while (cond.args) |block| {
+                cond.args = block.next;
+                for (&block.entries) |entry| {
+                    const arg = entry orelse break;
+                    switch (arg) {
+                        .read_resource, .write_resource => |v| v.unref(),
+                    }
+                }
+                self.deallocArgBlock(block);
+            }
             self.deallocCond(cond);
         };
 
@@ -793,11 +844,30 @@ pub const Scheduler = struct {
             try before_stack.appendSlice(std_allocator, curr.before);
             try after_stack.appendSlice(std_allocator, curr.after);
             for (curr.conditions) |cond_desc| {
+                var args: ArrayList(ParsedArg) = .empty;
+                errdefer while (args.pop()) |arg| {
+                    switch (arg) {
+                        .read_resource, .write_resource => |v| v.unref(),
+                    }
+                };
+                for (cond_desc.args) |arg| switch (arg) {
+                    .read_resource => |v| {
+                        const resource = self.world.resources.get(v) orelse return error.IdNotFound;
+                        resource.ref();
+                        try args.append(std_allocator, .{ .read_resource = resource });
+                    },
+                    .write_resource => |v| {
+                        const resource = self.world.resources.get(v) orelse return error.IdNotFound;
+                        resource.ref();
+                        try args.append(std_allocator, .{ .write_resource = resource });
+                    },
+                };
+
                 const cond = self.allocCond();
                 try cond_stack.append(std_allocator, cond);
                 cond.* = .{
                     .scheduler = self,
-                    .args = self.allocFillArgBlock(cond_desc.args),
+                    .args = self.allocFillArgBlock(args.items),
                     .data = cond_desc.data,
                     .cond = cond_desc.cond,
                 };
@@ -805,10 +875,31 @@ pub const Scheduler = struct {
 
             switch (curr.data) {
                 .sys => |sys_desc| {
+                    var skip_arg_deinit = false;
+                    var args: ArrayList(ParsedArg) = .empty;
+                    errdefer if (!skip_arg_deinit) while (args.pop()) |arg| {
+                        switch (arg) {
+                            .read_resource, .write_resource => |v| v.unref(),
+                        }
+                    };
+                    for (sys_desc.args) |arg| switch (arg) {
+                        .read_resource => |v| {
+                            const resource = self.world.resources.get(v) orelse return error.IdNotFound;
+                            resource.ref();
+                            try args.append(std_allocator, .{ .read_resource = resource });
+                        },
+                        .write_resource => |v| {
+                            const resource = self.world.resources.get(v) orelse return error.IdNotFound;
+                            resource.ref();
+                            try args.append(std_allocator, .{ .write_resource = resource });
+                        },
+                    };
+
                     const sys = self.allocSys();
                     if (curr_info.parent) |parent|
                         try desc_map.getPtr(parent).?.append(std_allocator, sys);
                     if (head == null) head = sys;
+                    skip_arg_deinit = true;
                     const label_len = @min(sys.label.len, sys_desc.label.len);
                     sys.* = .{
                         .scheduler = self,
@@ -819,7 +910,7 @@ pub const Scheduler = struct {
                         .after_subset = undefined,
                         .parent_conditions = self.allocFillCondBlock(cond_stack.items[0 .. cond_stack.items.len - curr.conditions.len]),
                         .conditions = self.allocFillCondBlock(cond_stack.items[cond_stack.items.len - curr.conditions.len ..]),
-                        .args = self.allocFillArgBlock(sys_desc.args),
+                        .args = self.allocFillArgBlock(args.items),
                         .data = sys_desc.data,
                         .run = sys_desc.system,
                         .deinit_fence = null,
@@ -940,10 +1031,10 @@ pub const Scheduler = struct {
         self.free_conditions = value;
     }
 
-    fn allocFillArgBlock(self: *Scheduler, args: []const Arg) ?*ArgBlock {
+    fn allocFillArgBlock(self: *Scheduler, args: []const ParsedArg) ?*ArgBlock {
         var head: ?*ArgBlock = null;
         var tail: ?*ArgBlock = null;
-        var iter = std.mem.window(Arg, args, ArgBlock.capacity, ArgBlock.capacity);
+        var iter = std.mem.window(ParsedArg, args, ArgBlock.capacity, ArgBlock.capacity);
         while (iter.next()) |value| {
             if (value.len == 0) break;
             const block = self.allocArgBlock();
@@ -1384,7 +1475,7 @@ pub fn worldAddRes(
     world: *fimo_worlds.World,
     desc: *const fimo_worlds.Res(anyopaque).Desc,
 ) callconv(.c) *fimo_worlds.Res(anyopaque) {
-    const d: ResDesc = .{ .label = desc.label.intoSliceOrEmpty(), .value = desc.value };
+    const d: ResDesc = .{ .label = desc.label.intoSliceOrEmpty(), .id = desc.id, .value = desc.value };
     const w: *World = @ptrCast(@alignCast(world));
     return @ptrCast(w.addRes(d));
 }
@@ -1403,7 +1494,7 @@ pub fn resDeinit(res: *fimo_worlds.Res(anyopaque)) callconv(.c) void {
     r.deinit();
 }
 
-pub fn resLockRead(res: *fimo_worlds.Res(anyopaque)) callconv(.c) *anyopaque {
+pub fn resLockRead(res: *fimo_worlds.Res(anyopaque)) callconv(.c) *const anyopaque {
     const r: *Res = @ptrCast(@alignCast(res));
     return r.lockRead();
 }

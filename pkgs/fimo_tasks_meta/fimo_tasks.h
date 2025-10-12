@@ -1068,7 +1068,7 @@ namespace ftasks {
                 Task task;
 
                 static void run(FTSK_Task *task, fstd::usize index) noexcept {
-                    Context &ctx = *fstd::parentOf(static_cast<Task *>(task), fstd::ConstexprValue<&Context::task>{});
+                    Context &ctx = *fstd::parentOf(static_cast<Task *>(task), fstd::ConstValue<&Context::task>{});
                     fstd::usize start_idx = index * ctx.batch_size;
                     fstd::usize end_idx = start_idx + ctx.batch_size;
                     for (fstd::usize i = start_idx; i < end_idx; i++) {

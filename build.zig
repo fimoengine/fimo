@@ -89,7 +89,7 @@ pub fn build(b: *std.Build) void {
 
     const test_filter = b.option([]const u8, "test-filter", "Filter the test execution to one specific package or module (default: none)");
 
-    const exe_profiler = b.option(bool, "exe-profiler", "Enable the profiler tool (default: yes)") orelse true;
+    const exe_profiler = b.option(bool, "exe-profiler", "Enable the profiler tool (default: no)") orelse false;
 
     const pkg_std = b.option(bool, "pkg-std", "Enable the fimo_std package (default: yes)") orelse true;
     const pkg_tasks = b.option(bool, "pkg-tasks", "Enable the fimo_tasks_meta package (default: yes)") orelse true;

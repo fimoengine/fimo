@@ -4389,6 +4389,13 @@ namespace fstd {
         }
     };
 
+    /// Generic hashing function for a given hasher and value pair.
+    ///
+    /// The hash function is represented by the hasher, i.e. any type that conforms to
+    /// the `Hasher` interface. Hashing of a type can be customized by creating a `hash`
+    /// function, which is called by means of argument dependendent loopup, or a method
+    /// with the same name. This fallback implementation is currently limited unpadded
+    /// types, but may be extended in the future to support memberwise hashing of structs.
     template<typename T>
     constexpr static void hash(Hasher auto &hasher, const T &value) noexcept
         requires(requires { value.hash(hasher); } or std::has_unique_object_representations_v<T>)
@@ -4412,8 +4419,19 @@ namespace fstd {
         }
     }
 
+    /// Convenience function to compute the hash of some value with the provided hasher.
+    ///
+    /// __NOTE__: This function is only indented for one-shot hashing.
+    /// See the `hash` function if you intended to hash a chain of objects, like the members of
+    /// a struct.
+    template<Hasher H, typename T>
+    constexpr static H::HashType hashAndFinish(H hasher, const T &value) noexcept {
+        hash(hasher, value);
+        return hasher.finish();
+    }
+
     template<auto Value_>
-    struct ConstexprValue {
+    struct ConstValue {
         constexpr static auto Value = Value_;
     };
 
@@ -4464,19 +4482,6 @@ namespace fstd {
         }
 
         inline void expectedNullTerminatedArray() {}
-        template<std::size_t N>
-        struct ConstString {
-            char str[N]{};
-
-            static constexpr std::size_t size = N - 1;
-
-            consteval ConstString() {}
-            consteval ConstString(const char (&new_str)[N]) {
-                if (new_str[N - 1] != '\0')
-                    expectedNullTerminatedArray();
-                std::copy_n(new_str, size, str);
-            }
-        };
 
         template<typename... Args>
         struct FormatString {
@@ -4513,6 +4518,21 @@ namespace fstd {
             constexpr ConstUnknownSlice &operator=(ConstUnknownSlice &&) noexcept = default;
         };
     } // namespace detail
+
+    inline void expectedNullTerminatedArray() {}
+    template<std::size_t N>
+    struct ConstString {
+        char str[N]{};
+
+        static constexpr std::size_t size = N - 1;
+
+        consteval ConstString() {}
+        consteval ConstString(const char (&new_str)[N]) {
+            if (new_str[N - 1] != '\0')
+                detail::expectedNullTerminatedArray();
+            std::copy_n(new_str, size, str);
+        }
+    };
 
     template<typename F, typename Ret, typename... Args>
     concept InvocableWithReturn = std::invocable<F, Args...> && requires(F &&f, Args &&...args) {
@@ -4567,15 +4587,15 @@ namespace fstd {
         }
 
         template<Callback<Ret, Args...> F, F f>
-        constexpr static auto wrap(ConstexprValue<f>) noexcept {
+        constexpr static auto wrap(ConstValue<f>) noexcept {
             if constexpr (HasContextArg<F>) {
-                return ConstexprValue<f>{};
+                return ConstValue<f>{};
             }
             else {
                 constexpr static auto wrapper = [](void *, Args... args) -> Ret {
                     return std::invoke_r<Ret>(f, std::forward<Args>(args)...);
                 };
-                return ConstexprValue<wrapper>{};
+                return ConstValue<wrapper>{};
             }
         }
     };
@@ -4609,7 +4629,7 @@ namespace fstd {
     using FormatString = detail::FormatString<std::type_identity_t<Args>...>;
 
     template<typename T, typename U, T U::*Member>
-    inline U *parentOf(T *value, ConstexprValue<Member>) noexcept {
+    inline U *parentOf(T *value, ConstValue<Member>) noexcept {
         constexpr static auto offset = detail::offsetOf<Member>();
         char *value_ptr = reinterpret_cast<char *>(value);
         value_ptr -= offset;
@@ -4617,7 +4637,7 @@ namespace fstd {
     }
 
     template<typename T, typename U, T U::*Member>
-    inline U const *parentOf(T const *value, ConstexprValue<Member>) noexcept {
+    inline U const *parentOf(T const *value, ConstValue<Member>) noexcept {
         constexpr static auto offset = detail::offsetOf<Member>();
         char const *value_ptr = reinterpret_cast<char *>(value);
         value_ptr -= offset;
@@ -4630,39 +4650,39 @@ namespace fstd {
 
     namespace tuple_detail {
         template<typename T>
-        struct IsTuple : ConstexprValue<false> {};
+        struct IsTuple : ConstValue<false> {};
 
         template<typename Head, typename... Rest>
-        struct FirstIsNotTuple : ConstexprValue<!IsTuple<Head>::Value> {};
+        struct FirstIsNotTuple : ConstValue<!IsTuple<Head>::Value> {};
 
         template<typename... Ts>
         struct IsEqualityComparable;
 
         template<typename T, typename U>
-                struct IsEqualityComparable<T, U> : ConstexprValue < requires(const T &t, const U &u) {
+                struct IsEqualityComparable<T, U> : ConstValue < requires(const T &t, const U &u) {
             {!(t == u)}->std::convertible_to<bool>;
         }>{};
 
         template<typename T>
-        struct IsEqualityComparable<T> : ConstexprValue<false> {};
+        struct IsEqualityComparable<T> : ConstValue<false> {};
 
         template<>
-        struct IsEqualityComparable<> : ConstexprValue<true> {};
+        struct IsEqualityComparable<> : ConstValue<true> {};
 
         template<typename... Ts>
         struct HasOrder;
 
         template<typename T, typename U>
-                struct HasOrder<T, U> : ConstexprValue < requires(const T &t, const U &u) {
+                struct HasOrder<T, U> : ConstValue < requires(const T &t, const U &u) {
             {!(t < u)}->std::convertible_to<bool>;
             {!(u < t)}->std::convertible_to<bool>;
         }>{};
 
         template<typename T>
-        struct HasOrder<T> : ConstexprValue<false> {};
+        struct HasOrder<T> : ConstValue<false> {};
 
         template<>
-        struct HasOrder<> : ConstexprValue<true> {};
+        struct HasOrder<> : ConstValue<true> {};
 
         constexpr auto three_way = []<class T, class U>(const T &t, const U &u)
             requires HasOrder<T, U>::Value
@@ -4683,17 +4703,17 @@ namespace fstd {
 
         template<typename T, typename... Rest>
         struct TupleAlignment<T, Rest...>
-            : ConstexprValue<(alignof(T) < TupleAlignment<Rest...>::Value) ? TupleAlignment<Rest...>::Value
-                                                                           : alignof(T)> {};
+            : ConstValue<(alignof(T) < TupleAlignment<Rest...>::Value) ? TupleAlignment<Rest...>::Value : alignof(T)> {
+        };
 
         template<>
-        struct TupleAlignment<> : ConstexprValue<static_cast<usize>(0)> {};
+        struct TupleAlignment<> : ConstValue<static_cast<usize>(0)> {};
 
         template<usize Offset, typename... Ts>
         struct TuplePadding;
 
         template<usize Offset, typename Head, typename... Rest>
-        struct TuplePadding<Offset, Head, Rest...> : ConstexprValue<alignForwards(Offset, alignof(Head)) - Offset> {};
+        struct TuplePadding<Offset, Head, Rest...> : ConstValue<alignForwards(Offset, alignof(Head)) - Offset> {};
         static_assert(TuplePadding<0, i32>::Value == 0);
         static_assert(TuplePadding<1, i32>::Value == 3);
         static_assert(TuplePadding<2, i32>::Value == 2);
@@ -4704,7 +4724,7 @@ namespace fstd {
 
 #pragma pack(push, 1)
         template<usize Index, usize Offset, typename T, typename... Rest>
-        struct TupleMember<Index, Offset, T, Rest...> : ConstexprValue<Index> {
+        struct TupleMember<Index, Offset, T, Rest...> : ConstValue<Index> {
             T member;
             char padding[TuplePadding<Offset + sizeof(member), Rest...>::Value];
             TupleMember<Index + 1, Offset + sizeof(member) + sizeof(padding), Rest...> next;
@@ -4872,7 +4892,7 @@ namespace fstd {
 #pragma pack(pop)
 
         template<usize Index, usize Offset, typename T>
-        struct TupleMember<Index, Offset, T> : ConstexprValue<Index> {
+        struct TupleMember<Index, Offset, T> : ConstValue<Index> {
             T member;
 
             constexpr TupleMember() noexcept(std::conjunction_v<std::is_nothrow_default_constructible<T>>)
@@ -4998,7 +5018,7 @@ namespace fstd {
         };
 
         template<usize Index, usize Offset>
-        struct TupleMember<Index, Offset> : ConstexprValue<Index> {};
+        struct TupleMember<Index, Offset> : ConstValue<Index> {};
 
         template<usize Index, typename Ret, typename Head>
         constexpr Ret &get(Head &head) {
@@ -5189,16 +5209,16 @@ namespace fstd {
     };
 
     template<typename... Ts>
-    struct tuple_detail::IsTuple<Tuple<Ts...>> : ConstexprValue<true> {};
+    struct tuple_detail::IsTuple<Tuple<Ts...>> : ConstValue<true> {};
 
     template<typename T>
     struct TupleSize;
 
     template<typename T>
-    struct TupleSize<const T> : ConstexprValue<TupleSize<T>::Value> {};
+    struct TupleSize<const T> : ConstValue<TupleSize<T>::Value> {};
 
     template<typename... Ts>
-    struct TupleSize<Tuple<Ts...>> : ConstexprValue<sizeof...(Ts)> {};
+    struct TupleSize<Tuple<Ts...>> : ConstValue<sizeof...(Ts)> {};
 
     template<typename T>
     constexpr usize TupleSizeV = TupleSize<T>::Value;
@@ -5262,10 +5282,10 @@ namespace fstd {
         struct ConcatArrayLen;
 
         template<typename Tuple, typename... Rest>
-        struct ConcatArrayLen<Tuple, Rest...> : ConstexprValue<TupleSizeV<Tuple> + ConcatArrayLen<Rest...>::Value> {};
+        struct ConcatArrayLen<Tuple, Rest...> : ConstValue<TupleSizeV<Tuple> + ConcatArrayLen<Rest...>::Value> {};
 
         template<>
-        struct ConcatArrayLen<> : ConstexprValue<static_cast<usize>(0)> {};
+        struct ConcatArrayLen<> : ConstValue<static_cast<usize>(0)> {};
 
         template<usize I, usize Start, typename... Tuples>
         consteval static void fillConcatTupleIndices(std::array<usize, ConcatArrayLen<Tuples...>::Value> &indices) {
@@ -5542,7 +5562,7 @@ namespace fstd {
             return initPlatformError(static_cast<FSTD_PlatformError>(err));
         }
         // TODO(gabriel, https://github.com/llvm/llvm-project/issues/82994): Replace with consteval.
-        template<detail::ConstString String>
+        template<ConstString String>
         static constexpr Result initStaticStr() noexcept {
             constexpr static StrConst StringSlice = String.str;
             constexpr static FSTD_ResultVtable VTable = {
@@ -6324,9 +6344,9 @@ namespace fstd {
 
         constexpr static const char DefaultScope[] = FSTD_TRACING_DEFAULT_SCOPE;
         constexpr static const char DefaultTarget[] = FSTD_TRACING_DEFAULT_TARGET;
-        template<detail::ConstString scope = DefaultScope, Level max_level = DefaultMaxLevel>
+        template<ConstString scope = DefaultScope, Level max_level = DefaultMaxLevel>
         struct Scope {
-            template<detail::ConstString target = DefaultTarget, Level max_lvl = max_level>
+            template<ConstString target = DefaultTarget, Level max_lvl = max_level>
             struct Target {
                 constexpr static auto ScopeName = scope;
                 constexpr static auto TargetName = target;
@@ -6709,121 +6729,121 @@ namespace fstd {
                     switch (*tag) {
                         case FSTD_TracingEventTag_Start: {
                             if constexpr (requires { sub.onEvent(std::declval<Start>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&Start::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&Start::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_Finish: {
                             if constexpr (requires { sub.onEvent(std::declval<Finish>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&Finish::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&Finish::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_RegisterThread: {
                             if constexpr (requires { sub.onEvent(std::declval<RegisterThread>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&RegisterThread::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&RegisterThread::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_UnregisterThread: {
                             if constexpr (requires { sub.onEvent(std::declval<UnregisterThread>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&UnregisterThread::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&UnregisterThread::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_CreateCallStack: {
                             if constexpr (requires { sub.onEvent(std::declval<CreateCallStack>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&CreateCallStack::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&CreateCallStack::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_DestroyCallStack: {
                             if constexpr (requires { sub.onEvent(std::declval<DestroyCallStack>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&DestroyCallStack::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&DestroyCallStack::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_UnblockCallStack: {
                             if constexpr (requires { sub.onEvent(std::declval<UnblockCallStack>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&UnblockCallStack::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&UnblockCallStack::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_SuspendCallStack: {
                             if constexpr (requires { sub.onEvent(std::declval<SuspendCallStack>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&SuspendCallStack::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&SuspendCallStack::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_ResumeCallStack: {
                             if constexpr (requires { sub.onEvent(std::declval<ResumeCallStack>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&ResumeCallStack::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&ResumeCallStack::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_EnterSpan: {
                             if constexpr (requires { sub.onEvent(std::declval<EnterSpan>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&EnterSpan::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&EnterSpan::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_ExitSpan: {
                             if constexpr (requires { sub.onEvent(std::declval<ExitSpan>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&ExitSpan::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&ExitSpan::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_LogMessage: {
                             if constexpr (requires { sub.onEvent(std::declval<LogMessage>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&LogMessage::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&LogMessage::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_DeclareEventInfo: {
                             if constexpr (requires { sub.onEvent(std::declval<DeclareEventInfo>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&DeclareEventInfo::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&DeclareEventInfo::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_StartThread: {
                             if constexpr (requires { sub.onEvent(std::declval<StartThread>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&StartThread::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&StartThread::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_StopThread: {
                             if constexpr (requires { sub.onEvent(std::declval<StopThread>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&StopThread::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&StopThread::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_LoadImage: {
                             if constexpr (requires { sub.onEvent(std::declval<LoadImage>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&LoadImage::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&LoadImage::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_UnloadImage: {
                             if constexpr (requires { sub.onEvent(std::declval<UnloadImage>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&UnloadImage::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&UnloadImage::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_ContextSwitch: {
                             if constexpr (requires { sub.onEvent(std::declval<ContextSwitch>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&ContextSwitch::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&ContextSwitch::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_ThreadWakeup: {
                             if constexpr (requires { sub.onEvent(std::declval<ThreadWakeup>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&ThreadWakeup::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&ThreadWakeup::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
                         case FSTD_TracingEventTag_CallStackSample: {
                             if constexpr (requires { sub.onEvent(std::declval<CallStackSample>()); }) {
-                                auto *event = parentOf(tag, ConstexprValue<&CallStackSample::tag>{});
+                                auto *event = parentOf(tag, ConstValue<&CallStackSample::tag>{});
                                 sub.onEvent(*event);
                             }
                         } break;
@@ -7525,17 +7545,17 @@ namespace fstd {
                 symbol(sym), type(SymbolType::Static), linkage(linkage), static_value(&value) {};
 
             template<auto Member, typename Unique>
-            constexpr SymbolExport(const Symbol<T, Unique> &sym, ConstexprValue<Member> value) noexcept :
+            constexpr SymbolExport(const Symbol<T, Unique> &sym, ConstValue<Member> value) noexcept :
                 SymbolExport(static_cast<SymbolIdExt<T>>(sym), SymbolLinkage::Global, value) {}
             template<auto Member>
-            constexpr SymbolExport(const SymbolIdExt<T> &sym, ConstexprValue<Member> value) noexcept :
+            constexpr SymbolExport(const SymbolIdExt<T> &sym, ConstValue<Member> value) noexcept :
                 SymbolExport(sym, SymbolLinkage::Global, value) {}
             template<auto Member, typename Unique>
             constexpr SymbolExport(const Symbol<T, Unique> &sym, SymbolLinkage linkage,
-                                   ConstexprValue<Member> value) noexcept :
+                                   ConstValue<Member> value) noexcept :
                 SymbolExport(static_cast<SymbolIdExt<T>>(sym), linkage, value){};
             template<auto Member>
-            constexpr SymbolExport(const SymbolIdExt<T> &sym, SymbolLinkage linkage, ConstexprValue<Member>) noexcept :
+            constexpr SymbolExport(const SymbolIdExt<T> &sym, SymbolLinkage linkage, ConstValue<Member>) noexcept :
                 symbol(sym), type(SymbolType::StateOffset), linkage(linkage),
                 state_offset(detail::offsetOf<Member>()){};
 
@@ -7567,7 +7587,7 @@ namespace fstd {
         template<auto Member, typename... Args>
         static consteval SymbolExport<typename detail::MemberPointerInfo<Member>::Type>
         makeMemberExport(Args &&...args) {
-            return SymbolExport{std::forward<Args>(args)..., ConstexprValue<Member>{}};
+            return SymbolExport{std::forward<Args>(args)..., ConstValue<Member>{}};
         }
 
 
@@ -7909,7 +7929,7 @@ namespace fstd {
                 switch (*tag) {
                     case FSTD_ModuleExportEventTag_BindCtx:
                         if constexpr (requires { T::onBind; }) {
-                            auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventBindCtx::tag>{});
+                            auto *event = parentOf(tag, ConstValue<&FSTD_ModuleExportEventBindCtx::tag>{});
                             event->bind = [](FSTD_Ctx *cctx) noexcept {
                                 ctx::Handle ctx = cctx;
                                 std::invoke_r<void>(T::onBind, ctx);
@@ -7919,13 +7939,13 @@ namespace fstd {
                         break;
                     case FSTD_ModuleExportEventTag_UnbindCtx:
                         if constexpr (requires { T::onUnbind; }) {
-                            auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventUnbindCtx::tag>{});
+                            auto *event = parentOf(tag, ConstValue<&FSTD_ModuleExportEventUnbindCtx::tag>{});
                             event->unbind = []() noexcept { std::invoke_r<void>(T::onUnbind); };
                             return;
                         };
                         break;
                     case FSTD_ModuleExportEventTag_Init: {
-                        auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventInit::tag>{});
+                        auto *event = parentOf(tag, ConstValue<&FSTD_ModuleExportEventInit::tag>{});
                         if constexpr (requires { T::onInit; }) {
                             event->poll = [](FSTD_ModuleInstance *cinstance, FSTD_ModuleLoader *cloader,
                                              FSTD_TaskWaker cwaker,
@@ -7963,7 +7983,7 @@ namespace fstd {
                         return;
                     }
                     case FSTD_ModuleExportEventTag_Deinit: {
-                        auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventDeinit::tag>{});
+                        auto *event = parentOf(tag, ConstValue<&FSTD_ModuleExportEventDeinit::tag>{});
                         if constexpr (requires { T::onDeinit; }) {
                             event->poll = [](FSTD_ModuleInstance *, FSTD_TaskWaker cwaker, void *) noexcept {
                                 auto &global = GlobalData::get();
@@ -7992,7 +8012,7 @@ namespace fstd {
                         return;
                     }
                     case FSTD_ModuleExportEventTag_Start: {
-                        auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventStart::tag>{});
+                        auto *event = parentOf(tag, ConstValue<&FSTD_ModuleExportEventStart::tag>{});
                         if constexpr (requires { T::onStart; }) {
                             event->poll = [](FSTD_ModuleInstance *, FSTD_TaskWaker cwaker,
                                              FSTD_Result *cresult) noexcept {
@@ -8009,7 +8029,7 @@ namespace fstd {
                         }
                     } break;
                     case FSTD_ModuleExportEventTag_Stop: {
-                        auto *event = parentOf(tag, ConstexprValue<&FSTD_ModuleExportEventStop::tag>{});
+                        auto *event = parentOf(tag, ConstValue<&FSTD_ModuleExportEventStop::tag>{});
                         if constexpr (requires { T::onStop; }) {
                             event->poll = [](FSTD_ModuleInstance *, FSTD_TaskWaker cwaker,
                                              FSTD_Result *cresult) noexcept {

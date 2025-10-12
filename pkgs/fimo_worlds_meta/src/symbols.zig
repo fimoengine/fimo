@@ -64,7 +64,7 @@ pub const resource_lock_read = Symbol{
     .name = "resource_lock_read",
     .namespace = symbol_namespace,
     .version = context_version,
-    .T = fn (res: *Res) callconv(.c) *anyopaque,
+    .T = fn (res: *Res) callconv(.c) *const anyopaque,
 };
 pub const resource_unlock_read = Symbol{
     .name = "resource_unlock_read",
