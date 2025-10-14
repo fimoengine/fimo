@@ -384,8 +384,10 @@ namespace fworlds {
         ///
         /// __NOTE__: This may inhibit the scheduling of systems, as it is a valid implementation
         /// strategy to acquire all necessary resources before executing any system.
+        template<typename U = T>
         [[nodiscard("the resource must be unlocked")]]
-        T const *lockRead() const noexcept;
+        const U &lockRead() const noexcept
+            requires(not std::is_same_v<T, void> and std::is_same_v<T, U>);
 
         /// Unlocks a resource acquired with read access.
         void unlockRead() const noexcept;
@@ -394,8 +396,10 @@ namespace fworlds {
         ///
         /// __NOTE__: This may inhibit the scheduling of systems, as it is a valid implementation
         /// strategy to acquire all necessary resources before executing any system.
+        template<typename U = T>
         [[nodiscard("the resource must be unlocked")]]
-        T *lockWrite() const noexcept;
+        U &lockWrite() const noexcept
+            requires(not std::is_same_v<T, void> and std::is_same_v<T, U>);
 
         /// Unlocks a resource acquired with write access.
         void unlockWrite() const noexcept;
@@ -441,6 +445,9 @@ namespace fworlds {
         /// Blocks the calling thread until all scheduled operations are completed.
         auto flush() const noexcept -> void { fwrld_scheduler_flush(this->handle); }
     };
+
+    template<typename... Ts>
+    struct SystemDependencyList {};
 
     namespace detail {
         struct Arg {
@@ -543,6 +550,12 @@ namespace fworlds {
             using ReturnType = Ret;
             using ArgsType = fstd::Tuple<Args...>;
         };
+        template<typename Ret, typename... Args>
+        struct FunctionArgs<Ret (*)(Args...) noexcept> {
+            using StaticType = Ret (*)(Args...) noexcept;
+            using ReturnType = Ret;
+            using ArgsType = fstd::Tuple<Args...>;
+        };
         template<typename Ret, typename T, typename... Args>
         struct FunctionArgs<Ret (T::*)(Args...)> {
             using StaticType = Ret (*)(Args...);
@@ -561,6 +574,13 @@ namespace fworlds {
         template<typename Ret, typename... Args_>
         struct CallableInfo<Ret (*)(Args_...)> {
             using Type = Ret (*)(Args_...);
+            using StaticType = FunctionArgs<Type>::StaticType;
+            using Return = FunctionArgs<Type>::ReturnType;
+            using Args = FunctionArgs<Type>::ArgsType;
+        };
+        template<typename Ret, typename... Args_>
+        struct CallableInfo<Ret (*)(Args_...) noexcept> {
+            using Type = Ret (*)(Args_...) noexcept;
             using StaticType = FunctionArgs<Type>::StaticType;
             using Return = FunctionArgs<Type>::ReturnType;
             using Args = FunctionArgs<Type>::ArgsType;
@@ -945,9 +965,12 @@ namespace fworlds {
     }
 
     template<typename T>
+    template<typename U>
     [[nodiscard("the resource must be unlocked")]]
-    inline T const *Res<T>::lockRead() const noexcept {
-        return static_cast<T const *>(fwrld_resource_lock_read(this->handle));
+    inline U const &Res<T>::lockRead() const noexcept
+        requires(not std::is_same_v<T, void> and std::is_same_v<T, U>)
+    {
+        return *static_cast<T const *>(fwrld_resource_lock_read(this->handle));
     }
 
     template<typename T>
@@ -956,9 +979,12 @@ namespace fworlds {
     }
 
     template<typename T>
+    template<typename U>
     [[nodiscard("the resource must be unlocked")]]
-    inline T *Res<T>::lockWrite() const noexcept {
-        return static_cast<T *>(fwrld_resource_lock_write(this->handle));
+    inline U &Res<T>::lockWrite() const noexcept
+        requires(not std::is_same_v<T, void> and std::is_same_v<T, U>)
+    {
+        return *static_cast<T *>(fwrld_resource_lock_write(this->handle));
     }
 
     template<typename T>
