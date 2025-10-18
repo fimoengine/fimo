@@ -14,6 +14,7 @@ const tracing = @import("context/tracing.zig");
 const memory = @import("memory.zig");
 const Arena = memory.Arena;
 const BuddyAllocator = memory.BuddyAllocator;
+const MultiSlabAllocator = memory.MultiSlabAllocator;
 const pub_ctx = @import("ctx.zig");
 const pub_modules = @import("modules.zig");
 const pub_tracing = @import("tracing.zig");
@@ -22,6 +23,7 @@ const SliceConst = utils.SliceConst;
 const Version = @import("Version.zig");
 
 const Self = @This();
+const FimoAllocatorTag = struct {};
 
 const default_global_arena_reserve = 1024 * 1024 * 1024 * 64; // 64 GiB
 const default_scratch_arena_reserve = 1024 * 1024 * 1024 * 1; // 1 GiB
@@ -30,20 +32,13 @@ const page_allocator_max_page_size = 1024 * 1024 * 1024 * 1; // 1 GiB
 var lock: std.Thread.Mutex = .{};
 var arena: Arena = undefined;
 var page_allocator: BuddyAllocator = undefined;
+var general_purpose_allocator: MultiSlabAllocator(FimoAllocatorTag, .{}) = undefined;
+pub var allocator: Allocator = undefined;
 var scratch_reserve: usize = undefined;
 var scratch_commit: usize = undefined;
 pub var is_init: bool = false;
 
 var result_count: ResourceCount = .{};
-
-var debug_allocator = switch (builtin.mode) {
-    .Debug, .ReleaseSafe => std.heap.DebugAllocator(.{}).init,
-    else => {},
-};
-pub var allocator = switch (builtin.mode) {
-    .Debug, .ReleaseSafe => debug_allocator.allocator(),
-    else => std.heap.smp_allocator,
-};
 
 pub const ThreadData = struct {
     result: AnyResult = .ok,
@@ -208,14 +203,6 @@ pub fn init(options: []const *const pub_ctx.Cfg) !void {
     defer lock.unlock();
     if (is_init) return error.AlreadyInitialized;
 
-    errdefer switch (builtin.mode) {
-        .Debug, .ReleaseSafe => _ = {
-            if (debug_allocator.deinit() == .leak) @panic("memory leak");
-            debug_allocator = .init;
-            allocator = debug_allocator.allocator();
-        },
-        else => {},
-    };
     try ThreadData.Impl.init();
 
     var core_cfg: ?*const pub_ctx.CoreCfg = null;
@@ -249,6 +236,10 @@ pub fn init(options: []const *const pub_ctx.Cfg) !void {
     arena = try .init(.{ .reserve = global_arena_reserve, .commit = cfg.global_arena_commit });
     errdefer arena.deinit();
     page_allocator = try .init(arena.allocator(), arena.page_size, page_allocator_max_page_size);
+    general_purpose_allocator = .init(page_allocator.allocator());
+
+    allocator = general_purpose_allocator.stdAllocator();
+    errdefer allocator = undefined;
 
     try tracing.init(tracing_cfg orelse &.{});
     errdefer tracing.deinit();
@@ -278,16 +269,7 @@ pub fn deinit() void {
     clearResult();
     result_count.waitUntilZero();
     arena.deinit();
-
-    switch (builtin.mode) {
-        .Debug, .ReleaseSafe => _ = {
-            // if (debug_allocator.deinit() == .leak) @panic("memory leak");
-            if (debug_allocator.deinit() == .leak) {}
-            debug_allocator = .init;
-            allocator = debug_allocator.allocator();
-        },
-        else => {},
-    }
+    allocator = undefined;
     is_init = false;
 }
 

@@ -1203,6 +1203,280 @@ test BuddyAllocator {
     try std.heap.testAllocatorLargeAlignment(allocator.adaptIntoStdAllocator());
 }
 
+pub const MultiSlabAllocatorOptions = struct {
+    /// Length in bytes of one slab.
+    ///
+    /// Must be a power of two.
+    slab_len: usize = @max(std.heap.page_size_max, 1024 * 64),
+    /// Maximum number of arenas.
+    ///
+    /// An arena contains multiple slabs.
+    /// This value is optimally set to the expected number of cpu cores on the target system.
+    max_arenas_count: usize = 64,
+    /// Maximum number of allocation retries before allocating a new slab.
+    max_alloc_retries: usize = 1,
+};
+
+/// General purpose allocator, inspired by the Zig SmpAllocator.
+///
+/// The allocator utilizes a mixture of local and global state.
+/// Specifically, the allocator defines multiple memory arenas, each containing multiple slabs and free lists.
+/// Optimally, each thread is assigned one memory arena, whose index is stored in a global threadlocal variable.
+///
+/// A new allocator can be instantiated by providing an unique type tag.
+pub fn MultiSlabAllocator(comptime Unique: type, comptime options: MultiSlabAllocatorOptions) type {
+    std.debug.assert(std.math.isPowerOfTwo(options.slab_len));
+    std.debug.assert(options.max_arenas_count != 0);
+
+    return struct {
+        cpu_count: usize,
+        fallback_allocator: Allocator,
+        arenas: [max_arenas_count]Self.Arena = @splat(.{}),
+
+        threadlocal var arena_index: usize = 0;
+
+        const Self = @This();
+        const _ = Unique;
+
+        const slab_len = options.slab_len;
+        const max_arenas_count = options.max_arenas_count;
+        const max_alloc_retries = options.max_alloc_retries;
+
+        const min_size_class = std.math.log2(@sizeOf(usize));
+        const size_class_count = std.math.log2(slab_len) - min_size_class;
+
+        const allocator_vtable: Allocator.VTable = .{
+            .alloc = alloc,
+            .resize = resize,
+            .remap = remap,
+            .free = free,
+        };
+        const std_allocator_vtable: StdAllocator.VTable = .{
+            .alloc = stdAlloc,
+            .resize = stdResize,
+            .remap = stdRemap,
+            .free = stdFree,
+        };
+
+        const Arena = struct {
+            _: void align(std.atomic.cache_line) = {},
+            mutex: std.Thread.Mutex = .{},
+            slabs: [size_class_count]usize = @splat(0),
+            free_lists: [size_class_count]usize = @splat(0),
+
+            fn unlock(self: *Self.Arena) void {
+                self.mutex.unlock();
+            }
+        };
+
+        pub fn init(fallback: Allocator) Self {
+            return .{
+                .cpu_count = @min(std.Thread.getCpuCount() catch max_arenas_count, max_arenas_count),
+                .fallback_allocator = fallback,
+            };
+        }
+
+        pub fn deinit(self: *Self) void {
+            // The free list almost certainly contains multiple slabs,
+            // split into multiple blocks. Before deallocating the slabs, we
+            // must first find all allocations.
+            var slabs_head: ?*usize = null;
+            var slabs_tail: ?*usize = null;
+
+            for (self.arenas[0..self.cpu_count]) |*arena| {
+                for (arena.free_lists) |head| {
+                    var current = head;
+                    while (current != 0) {
+                        const node: *usize = @ptrFromInt(current);
+                        const next = node.*;
+                        current = next;
+
+                        if ((@intFromPtr(node) % slab_len) == 0) {
+                            node.* = 0;
+                            if (slabs_tail) |tail| {
+                                tail.* = @intFromPtr(node);
+                            } else {
+                                slabs_head = node;
+                            }
+                            slabs_tail = node;
+                        }
+                    }
+                }
+            }
+
+            while (slabs_head) |slab| {
+                slabs_head = @ptrFromInt(slab.*);
+                const bytes: [*]u8 = @ptrCast(slab);
+                self.fallback_allocator.rawFree(bytes[0..slab_len], .fromByteUnits(slab_len));
+            }
+
+            self.* = undefined;
+        }
+
+        fn alloc(ptr: ?*anyopaque, len: usize, alignment: usize) callconv(.c) ?[*]u8 {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            const size_class = sizeClassIndex(len, .fromByteUnits(alignment));
+            if (size_class >= size_class_count) {
+                @branchHint(.unlikely);
+                return self.fallback_allocator.rawAlloc(len, .fromByteUnits(alignment));
+            }
+
+            const slot_size = slotSize(size_class);
+            std.debug.assert(slab_len % slot_size == 0);
+            var retry_count: u8 = 0;
+
+            var arena = self.lockArena();
+            defer arena.unlock();
+
+            outer: while (true) {
+                const free_list_top = arena.free_lists[size_class];
+                if (free_list_top != 0) {
+                    @branchHint(.likely);
+                    const node: *usize = @ptrFromInt(free_list_top);
+                    arena.free_lists[size_class] = node.*;
+                    return @ptrFromInt(free_list_top);
+                }
+
+                const slab_top = arena.slabs[size_class];
+                if ((slab_top % slab_len) != 0) {
+                    @branchHint(.likely);
+                    arena.slabs[size_class] = slab_top + slot_size;
+                    return @ptrFromInt(slab_top);
+                }
+
+                if (retry_count >= max_alloc_retries) {
+                    @branchHint(.likely);
+                    const slab = self.fallback_allocator.rawAlloc(slab_len, .fromByteUnits(slab_len)) orelse return null;
+                    arena.slabs[size_class] = @intFromPtr(slab) + slot_size;
+                    return slab;
+                }
+
+                arena.unlock();
+                var index = arena_index;
+                while (true) {
+                    index = (index + 1) % self.cpu_count;
+                    arena = &self.arenas[index];
+                    if (arena.mutex.tryLock()) {
+                        arena_index = index;
+                        retry_count +%= 1;
+                        continue :outer;
+                    }
+                }
+            }
+        }
+
+        fn resize(ptr: ?*anyopaque, memory: Memory, alignment: usize, new_len: usize) callconv(.c) bool {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            const slice = memory.intoSliceOrEmpty();
+            const size_class = sizeClassIndex(slice.len, .fromByteUnits(alignment));
+            const new_size_class = sizeClassIndex(new_len, .fromByteUnits(alignment));
+            if (size_class >= size_class_count) {
+                if (new_size_class < size_class_count) return false;
+                return self.fallback_allocator.rawResize(slice, .fromByteUnits(alignment), new_len);
+            }
+            return size_class == new_size_class;
+        }
+
+        fn remap(ptr: ?*anyopaque, memory: Memory, alignment: usize, new_len: usize) callconv(.c) ?[*]u8 {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            const slice = memory.intoSliceOrEmpty();
+            const size_class = sizeClassIndex(slice.len, .fromByteUnits(alignment));
+            const new_size_class = sizeClassIndex(new_len, .fromByteUnits(alignment));
+            if (size_class >= size_class_count) {
+                if (new_size_class < size_class_count) return null;
+                return self.fallback_allocator.rawRemap(slice, .fromByteUnits(alignment), new_len);
+            }
+            return if (size_class == new_size_class) slice.ptr else null;
+        }
+
+        fn free(ptr: ?*anyopaque, memory: Memory, alignment: usize) callconv(.c) void {
+            const self: *Self = @ptrCast(@alignCast(ptr));
+            const slice = memory.intoSliceOrEmpty();
+            const size_class = sizeClassIndex(slice.len, .fromByteUnits(alignment));
+            if (size_class >= size_class_count) {
+                @branchHint(.unlikely);
+                return self.fallback_allocator.rawFree(slice, .fromByteUnits(alignment));
+            }
+
+            const node: *usize = @ptrCast(@alignCast(slice.ptr));
+
+            const arena = self.lockArena();
+            defer arena.unlock();
+
+            node.* = arena.free_lists[size_class];
+            arena.free_lists[size_class] = @intFromPtr(node);
+        }
+
+        fn lockArena(self: *Self) *Self.Arena {
+            var index = arena_index;
+            {
+                const arena = &self.arenas[index];
+                if (arena.mutex.tryLock()) {
+                    @branchHint(.likely);
+                    return arena;
+                }
+            }
+
+            std.debug.assert(self.cpu_count != 0);
+            while (true) {
+                index = (index + 1) % self.cpu_count;
+                const arena = &self.arenas[index];
+                if (arena.mutex.tryLock()) {
+                    @branchHint(.likely);
+                    arena_index = index;
+                    return arena;
+                }
+            }
+        }
+
+        fn sizeClassIndex(len: usize, alignment: mem.Alignment) usize {
+            return @max(@bitSizeOf(usize) - @clz(len - 1), @intFromEnum(alignment), min_size_class) - min_size_class;
+        }
+
+        fn slotSize(class: usize) usize {
+            return @as(usize, 1) << @intCast(class + min_size_class);
+        }
+
+        pub fn allocator(self: *Self) Allocator {
+            return .{ .ptr = self, .vtable = &allocator_vtable };
+        }
+
+        fn stdAlloc(ptr: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
+            _ = ret_addr;
+            return alloc(ptr, len, alignment.toByteUnits());
+        }
+        fn stdResize(ptr: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) bool {
+            _ = ret_addr;
+            return resize(ptr, .fromSlice(memory), alignment.toByteUnits(), new_len);
+        }
+        fn stdRemap(ptr: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+            _ = ret_addr;
+            return remap(ptr, .fromSlice(memory), alignment.toByteUnits(), new_len);
+        }
+        fn stdFree(ptr: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
+            _ = ret_addr;
+            return free(ptr, .fromSlice(memory), alignment.toByteUnits());
+        }
+
+        pub fn stdAllocator(self: *Self) StdAllocator {
+            return .{ .ptr = self, .vtable = &std_allocator_vtable };
+        }
+    };
+}
+
+test MultiSlabAllocator {
+    const MSAllocator = MultiSlabAllocator(struct {}, .{});
+    const fallback = Allocator.adaptFromStdAllocator(&std.testing.allocator);
+    var ms_allocator = MSAllocator.init(fallback);
+    defer ms_allocator.deinit();
+
+    const allocator = ms_allocator.allocator();
+    try std.heap.testAllocator(allocator.adaptIntoStdAllocator());
+    try std.heap.testAllocatorAligned(allocator.adaptIntoStdAllocator());
+    try std.heap.testAllocatorAlignedShrink(allocator.adaptIntoStdAllocator());
+    try std.heap.testAllocatorLargeAlignment(allocator.adaptIntoStdAllocator());
+}
+
 // ----------------------------------------------------
 // FFI
 // ----------------------------------------------------
