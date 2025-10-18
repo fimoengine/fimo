@@ -133,6 +133,7 @@ pub const CoreVTable = extern struct {
     deinit: *const fn () callconv(.c) void,
     get_global_arena: *const fn () callconv(.c) *Arena,
     get_page_allocator: *const fn () callconv(.c) Allocator,
+    get_global_allocator: *const fn () callconv(.c) Allocator,
     get_scratch_arena: *const fn (conflict: ?*Arena) callconv(.c) *Arena,
     set_custom_scratch_arenas: *const fn (first: *Arena, second: *Arena) callconv(.c) void,
     unset_custom_scratch_arenas: *const fn () callconv(.c) void,
@@ -185,6 +186,15 @@ pub fn getGlobalArena() *Arena {
 pub fn getPageAllocator() Allocator {
     const handle = Handle.getHandle();
     return handle.core_v0.get_page_allocator();
+}
+
+/// Returns an allocator suitable for general usage.
+///
+/// The allocator is backed by the global page allocator, which is ultimately backed by the
+/// global arena.
+pub fn getGlobalAllocator() Allocator {
+    const handle = Handle.getHandle();
+    return handle.core_v0.get_global_allocator();
 }
 
 /// Returns the scratch arena for the current thread.

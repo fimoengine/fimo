@@ -283,6 +283,11 @@ pub fn getPageAllocator() memory.Allocator {
     return page_allocator.allocator();
 }
 
+pub fn getGlobalAllocator() memory.Allocator {
+    std.debug.assert(is_init);
+    return general_purpose_allocator.allocator();
+}
+
 pub fn getScratchArena(conflict: ?*Arena) *Arena {
     std.debug.assert(is_init);
     const data = ThreadData.getOrInit();
@@ -347,6 +352,9 @@ const HandleImpl = struct {
     fn getPageAllocator() callconv(.c) memory.Allocator {
         return Self.getPageAllocator();
     }
+    fn getGlobalAllocator() callconv(.c) memory.Allocator {
+        return Self.getGlobalAllocator();
+    }
     fn getScratchArena(conflict: ?*Arena) callconv(.c) *Arena {
         return Self.getScratchArena(conflict);
     }
@@ -370,6 +378,7 @@ pub var handle = pub_ctx.Handle{
         .deinit = &HandleImpl.deinit,
         .get_global_arena = &HandleImpl.getGlobalArena,
         .get_page_allocator = &HandleImpl.getPageAllocator,
+        .get_global_allocator = &HandleImpl.getGlobalAllocator,
         .get_scratch_arena = &HandleImpl.getScratchArena,
         .set_custom_scratch_arenas = &HandleImpl.setCustomScratchArenas,
         .unset_custom_scratch_arenas = &HandleImpl.unsetCustomScratchArenas,

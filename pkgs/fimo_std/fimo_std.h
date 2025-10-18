@@ -1564,6 +1564,7 @@ typedef struct {
     void (*deinit)(void);
     FSTD_Arena *(*get_global_arena)(void);
     FSTD_Allocator (*get_page_allocator)(void);
+    FSTD_Allocator (*get_global_allocator)(void);
     FSTD_Arena *(*get_scratch_arena)(FSTD_Arena *FSTD_MAYBE_NULL conflict);
     void (*set_custom_scratch_arenas)(FSTD_Arena *first, FSTD_Arena *second);
     void (*unset_custom_scratch_arenas)(void);
@@ -1598,6 +1599,12 @@ fstd_func FSTD_Arena *fstd_ctx_get_global_arena(void);
 /// request chunks larger than one page size from the arena. The minimum alignment of an
 /// allocation is the page size.
 fstd_func FSTD_Allocator fstd_ctx_get_page_allocator(void);
+
+/// Returns an allocator suitable for general usage.
+///
+/// The allocator is backed by the global page allocator, which is ultimately backed by the
+/// global arena.
+fstd_func FSTD_Allocator fstd_ctx_get_global_allocator(void);
 
 /// Returns the scratch arena for the current thread.
 ///
@@ -6239,6 +6246,7 @@ namespace fstd {
         inline static Version getVersion() noexcept { return fstd_ctx_get_version(); }
         inline static Arena &getGlobalArena() noexcept { return *static_cast<Arena *>(fstd_ctx_get_global_arena()); }
         inline static Allocator getPageAllocator() noexcept { return fstd_ctx_get_page_allocator(); }
+        inline static Allocator getGlobalAllocator() noexcept { return fstd_ctx_get_global_allocator(); }
         inline static Arena &getScratchArena(Arena *conflict) noexcept {
             return *static_cast<Arena *>(fstd_ctx_get_scratch_arena(conflict));
         }
@@ -8443,6 +8451,11 @@ fstd_func_impl FSTD_Arena *fstd_ctx_get_global_arena(void) {
 fstd_func_impl FSTD_Allocator fstd_ctx_get_page_allocator(void) {
     FSTD_Ctx *handle = fstd_ctx_get();
     return handle->core_v0.get_page_allocator();
+}
+
+fstd_func_impl FSTD_Allocator fstd_ctx_get_global_allocator(void) {
+    FSTD_Ctx *handle = fstd_ctx_get();
+    return handle->core_v0.get_global_allocator();
 }
 
 fstd_func_impl FSTD_Arena *fstd_ctx_get_scratch_arena(FSTD_Arena *FSTD_MAYBE_NULL conflict) {
