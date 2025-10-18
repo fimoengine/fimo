@@ -3872,6 +3872,7 @@ struct FSTD_Ctx {
 #include <bit>
 #include <compare>
 #include <concepts>
+#include <exception>
 #include <expected>
 #include <format>
 #include <iterator>
@@ -5404,31 +5405,188 @@ namespace fstd {
         constexpr Allocator &operator=(const Allocator &other) noexcept = default;
         constexpr Allocator &operator=(Allocator &&other) noexcept = default;
 
+        FSTD_ALLOC void *FSTD_MAYBE_NULL rawAlloc(usize len, usize alignment) const noexcept {
+            return this->vtable->alloc(this->ptr, len, alignment);
+        }
+        bool rawResize(void *ptr, usize len, usize alignment, usize new_len) const noexcept {
+            return this->vtable->resize(this->ptr, {.ptr = (u8 *)ptr, .len = len}, alignment, new_len);
+        }
+        FSTD_ALLOC void *FSTD_MAYBE_NULL rawRemap(void *ptr, usize len, usize alignment, usize new_len) const noexcept {
+            return this->vtable->remap(this->ptr, {.ptr = (u8 *)ptr, .len = len}, alignment, new_len);
+        }
+        void rawFree(void *ptr, usize len, usize alignment) const noexcept {
+            return this->vtable->free(this->ptr, {.ptr = (u8 *)ptr, .len = len}, alignment);
+        }
+
+        /// Allocates and initializes a new instance using the provided arguments.
+        ///
+        /// Allocation failure results in the termination of the programm.
+        template<typename T, typename... Args>
+        FSTD_ALLOC T *create(Args &&...args) const noexcept(std::is_nothrow_constructible_v<T, Args...>) {
+            T *ptr = this->alloc<T>(1);
+            if (ptr == nullptr)
+                std::terminate();
+            return std::construct_at(ptr, std::forward<Args>(args)...);
+        }
+
+        /// Destroys and frees an instance initialized using `create`.
+        template<typename T>
+        void destroy(T *ptr) const noexcept(std::is_nothrow_destructible_v<T>) {
+            std::destroy_at(ptr);
+            return this->free<T>(ptr, 1);
+        }
+
+        /// Allocates a new array of the specified length, filled with uninitialized elements.
+        ///
+        /// Allocation failures result in the termination of the programm.
         template<typename T>
         FSTD_ALLOC T *FSTD_MAYBE_NULL alloc(usize n) const noexcept {
-            return static_cast<T *>(this->vtable->alloc(this->ptr, sizeof(T) * n, alignof(T)));
+            if (n == 0)
+                return nullptr;
+
+            if (void *ptr = this->rawAlloc(sizeof(T) * n, alignof(T)); ptr != nullptr) [[likely]]
+                return static_cast<T *>(ptr);
+            else
+                std::terminate();
         }
-        template<typename T>
-        bool resize(T *ptr, usize n, usize new_n) const noexcept {
-            return this->vtable->resize(this->ptr, {.ptr = (u8 *)ptr, .len = sizeof(T) * n}, alignof(T),
-                                        sizeof(T) * new_n);
-        }
-        template<typename T>
-        FSTD_ALLOC T *FSTD_MAYBE_NULL remap(T *ptr, usize n, usize new_n) const noexcept {
-            return static_cast<T *>(this->vtable->remap(this->ptr, {.ptr = (u8 *)ptr, .len = sizeof(T) * n}, alignof(T),
-                                                        sizeof(T) * new_n));
-        }
+
+        /// Frees an array allocated with `alloc`.
+        ///
+        /// All elements of the array are assumed to be uninitialized and are therefore not destroyed.
         template<typename T>
         void free(T *ptr, usize n) const noexcept {
-            return this->vtable->free(this->ptr, {.ptr = (u8 *)ptr, .len = sizeof(T) * n}, alignof(T));
+            if (n == 0)
+                return;
+            return this->rawFree(ptr, sizeof(T) * n, alignof(T));
         }
+
+        /// Tries to resize the memory block pointed to by `ptr` inplace.
+        ///
+        /// If the result is `false`, the region of memory pointed to by `ptr` remains unchanged.
+        /// If `n < new_n`, `ptr` points to the same block of memory, where the elements in the range `[0, n)` are
+        /// initialized, while the range `[n, new_n)` is uninitialized. Otherwise, the elements at the indices `[new_n,
+        /// n)` are destroyed.
         template<typename T>
-        FSTD_ALLOC T *FSTD_MAYBE_NULL create() const noexcept {
-            return this->alloc<T>(1);
+        bool resize(T *ptr, usize n, usize new_n) const noexcept(std::is_nothrow_destructible_v<T>) {
+            if (new_n == 0) {
+                if constexpr (not std::is_trivially_destructible_v<T>) {
+                    std::destroy_n(ptr, n);
+                }
+                this->free(ptr, n);
+                return true;
+            }
+            if (n == 0)
+                return false;
+
+            if constexpr (not std::is_trivially_destructible_v<T>) {
+                if (new_n < n)
+                    return false;
+            }
+            return this->rawResize(ptr, sizeof(T) * n, alignof(T), sizeof(T) * new_n);
         }
+
+        /// Tries to resize the memory block pointed to by `ptr`, possibly moving the allocation.
+        ///
+        /// If `n < new_n`, the returned pointer points to an array, where the elements in the range `[0, n)`
+        /// are initialized, while the range `[n, new_n)` is uninitialized. Otherwise, the elements at the
+        /// indices `[new_n, n)` are destroyed.
+        ///
+        /// Note that this function may fail if it can not guarantee that the operation is save.
         template<typename T>
-        void destroy(T *ptr) const noexcept {
-            return this->free(ptr, 1);
+        FSTD_ALLOC T *FSTD_MAYBE_NULL remap(T *ptr, usize n, usize new_n) const
+                noexcept(std::is_nothrow_destructible_v<T>) {
+            if (new_n == 0) {
+                if constexpr (not std::is_trivially_destructible_v<T>) {
+                    std::destroy_n(ptr, n);
+                }
+                this->free(ptr, n);
+                return nullptr;
+            }
+            if (n == 0)
+                return nullptr;
+
+            // TODO: Replace with `is_trivially_rellocatable`.
+            // NOTE(gabriel): The simple case of a trivially copyable type is equivalent to a C type.
+            // In that case we can call remap directly, as it follows the same semantics as memcpy in
+            // case of a move.
+            if constexpr (std::is_trivially_copyable_v<T>) {
+                return static_cast<T *>(this->rawRemap(ptr, sizeof(T) * n, alignof(T), sizeof(T) * new_n));
+            }
+            else {
+                // NOTE(gabriel): Since we are now dealing with a non-trivial type, we can not ensure that
+                // a remap is correct for the following reasons:
+                // - If we grow the memory block, we must move the elements after allocating the bigger block,
+                // but the previous block is invalidated.
+                // - If we shrink the memory block, we must destroy the elements before remapping, but the
+                // remap operation may fail, leading to a contract violation.
+                //
+                // For these reasons, we may only try operations that work inplace, like resize.
+                return this->resize(ptr, n, new_n) == true ? ptr : nullptr;
+            }
+        }
+
+        /// Rellocates the elements to a bigger/smaller memory block.
+        ///
+        /// If `n < new_n`, the returned pointer points to an array, where the elements in the range `[0, n)`
+        /// are initialized, while the range `[n, new_n)` is uninitialized. Otherwise, the elements at the
+        /// indices `[new_n, n)` are destroyed.
+        ///
+        /// This function guarantees strong exception safety, if `T` is noexcept move constructible, or is
+        /// otherwise copy constructible. Allocation failures result in the termination of the programm.
+        template<typename T>
+        FSTD_ALLOC T *FSTD_MAYBE_NULL realloc(T *ptr, usize n, usize new_n) const
+                noexcept(std::is_trivially_copyable_v<T> or
+                         (std::is_nothrow_destructible_v<T> and std::is_nothrow_move_constructible_v<T>)) {
+            if (n == 0)
+                return this->alloc<T>(new_n);
+            if (new_n == 0) {
+                if constexpr (not std::is_trivially_destructible_v<T>) {
+                    std::destroy_n(ptr, n);
+                }
+                this->free(ptr, n);
+                return nullptr;
+            }
+
+            // NOTE(gabriel): First we try growing the memory block, and if it succeeds we are done.
+            if (T *new_ptr = this->remap(ptr, n, new_n); new_ptr != nullptr)
+                return new_ptr;
+
+            // NOTE(gabriel): Since the remap operation is fallible, we have to fall back to manually
+            // allocating a new block, and moving the elements individually.
+            T *new_ptr = this->alloc<T>(new_n);
+            if (new_ptr == nullptr)
+                std::terminate();
+
+            // TODO(gabriel): Add is_trivially_rellocatable.
+            // NOTE(gabriel): In the simple case we can memcpy all elements, without having to care about
+            // any exceptions.
+            if constexpr (std::is_trivially_copyable_v<T>) {
+                std::uninitialized_copy_n(ptr, n, new_ptr);
+            }
+            // NOTE(gabriel): Similarly, for noexcept movable types, we can move all elements individually.
+            else if constexpr (std::is_nothrow_move_constructible_v<T>) {
+                std::uninitialized_move_n(ptr, new_n, new_ptr);
+            }
+            // NOTE(gabriel): Finally, if we only have throwing operations, we wrap the copy/move in a try
+            // catch. In this case, we prefer a copy, since an exception would not modify the original array.
+            else {
+                try {
+                    if constexpr (std::is_copy_constructible_v<T>)
+                        std::uninitialized_copy_n(ptr, new_n, new_ptr);
+                    else
+                        std::uninitialized_move_n(ptr, new_n, new_ptr);
+                }
+                catch (...) {
+                    this->free(new_ptr, new_n);
+                    throw;
+                }
+            }
+
+            if constexpr (not std::is_trivially_destructible_v<T>) {
+                std::destroy_n(ptr, n);
+            }
+            this->free(ptr, n);
+            return new_ptr;
         }
     };
     static constexpr Allocator Allocator_Null = {FSTD_Allocator_Null};
